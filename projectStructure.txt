@@ -1,0 +1,51 @@
+library-system/
+├── backend/
+│   ├── config/
+│   │   └── db.js                  ← mysql2/promise pool (done)
+│   ├── controllers/
+│   │   ├── auth.controller.js     ← JWT login/refresh/logout (dine)
+│   │   ├── book.controller.js     ← catalog CRUD (done)
+│   │   └── issue.controller.js    ← checkout/return logic (done)
+│   ├── middleware/
+│   │   └── auth.middleware.js     ← checkAuth, checkRole, checkMemberType (done)
+│   ├── routes/
+│   │   ├── auth.routes.js
+│   │   ├── book.routes.js
+│   │   ├── member.routes.js
+│   │   ├── transaction.routes.js
+│   │   └── department.routes.js
+│   ├── schema.sql             (done)    ← all 13 tables + views + seed data
+│   ├── package.json
+│   ├── server.js         (done)         ← Express entry + CORS
+│   └── .env.example (done)
+│
+└── frontend/
+    ├── src/
+    │   ├── api/
+    │   │   └── axios.js           ← configured instance + interceptors (done)
+    │   ├── components/
+    │   │   ├── layout/
+    │   │   │   └── AppLayout.jsx  ← sidebar + topbar shell (done)
+    │   │   ├── ui/
+    │   │   │   └── BookCard.jsx   ← Bookwise catalog card (done)
+    │   │   └── ProtectedRoute.jsx ← role-based guard (done)
+    │   ├── pages/
+    │   │   ├── auth/LoginPage.jsx (done)
+    │   │   ├── auth/UnauthorizedPage.jsx 
+    │   │   ├── dashboard/Dashboard.jsx (done)
+    │   │   ├── books/BookCatalog.jsx (done)
+    │   │   ├── books/BookDetail.jsx
+    │   │   ├── members/MembersPage.jsx
+    │   │   ├── transactions/TransactionsPage.jsx (done)
+    │   │   └── transactions/OverduePage.jsx
+    │   ├── store/
+    │   │   ├── index.js
+    │   │   └── slices/authSlice.js (done)
+    │   ├── main.jsx               ← createBrowserRouter + ProtectedRoute (done)
+    │   └── index.css              ← Tailwind + Google Fonts
+    ├── package.json
+    ├── vite.config.js
+    ├── tailwind.config.js
+    ├── postcss.config.js
+    ├── index.html
+    └── .env.example

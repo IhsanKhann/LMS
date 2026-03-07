@@ -1,0 +1,46 @@
+/* src/index.css */
+@import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;600;700&family=DM+Sans:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  * { box-sizing: border-box; }
+  body {
+    font-family: 'DM Sans', sans-serif;
+    @apply bg-surface text-slate-800 antialiased;
+  }
+  h1, h2, h3 { font-family: 'Playfair Display', serif; }
+}
+
+@layer components {
+  .btn-primary {
+    @apply bg-primary text-white px-4 py-2 rounded-lg font-medium
+           hover:bg-[#4338CA] active:scale-95 transition-all duration-150;
+  }
+  .btn-outline {
+    @apply border border-slate-300 text-slate-700 px-4 py-2 rounded-lg font-medium
+           hover:border-primary hover:text-primary transition-colors duration-150;
+  }
+  .card {
+    @apply bg-white rounded-xl shadow-card border border-slate-100 p-6;
+  }
+  .badge-available {
+    @apply inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium
+           bg-success-light text-emerald-700;
+  }
+  .badge-issued {
+    @apply inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium
+           bg-warning-light text-amber-700;
+  }
+  .badge-overdue {
+    @apply inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium
+           bg-danger-light text-red-700;
+  }
+  .input {
+    @apply w-full border border-slate-200 rounded-lg px-3 py-2 text-sm
+           focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary
+           transition-shadow duration-150;
+  }
+}
