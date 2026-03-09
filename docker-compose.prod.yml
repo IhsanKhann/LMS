@@ -1,0 +1,25 @@
+version: "3.9"
+
+services:
+
+  backend:
+    build: ./backend
+    ports:
+      - "3000:3000"
+    environment:
+      DB_HOST: mysql
+      DB_USER: root
+      DB_PASSWORD: Mintfever28@ihsan
+      DB_NAME: university_library
+
+  mysql:
+    image: mysql:8
+    restart: always
+    environment:
+      MYSQL_ROOT_PASSWORD: Mintfever28@ihsan
+      MYSQL_DATABASE: university_library
+    volumes:
+      - mysql-data:/var/lib/mysql
+
+volumes:
+  mysql-data:
