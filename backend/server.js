@@ -18,11 +18,25 @@ const app  = express();
 const PORT = process.env.PORT || 5000;
 
 // ── CORS (must come before routes) ───────────────────────────────────────────
+const allowedOrigins = [
+  process.env.CLIENT_ORIGIN, // e.g., http://localhost:5174
+  "http://localhost:5175",
+  "http://localhost:5173"
+];
+
 app.use(
   cors({
-    origin:      process.env.CLIENT_ORIGIN || "http://localhost:5174",
-    credentials: true,                      // allow HttpOnly cookies + Auth header
-    methods:     ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    origin: function (origin, callback) {
+      // allow requests with no origin (like mobile apps or curl)
+      if (!origin) return callback(null, true);
+      if (allowedOrigins.indexOf(origin) !== -1) {
+        callback(null, true);
+      } else {
+        callback(new Error("Not allowed by CORS"));
+      }
+    },
+    credentials: true,
+    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allowedHeaders: ["Content-Type", "Authorization"],
   })
 );
@@ -55,6 +69,6 @@ app.use((err, _req, res, _next) => {
   });
 });
 
-app.listen(PORT, () =>
-  console.log(`🚀 Server running on http://localhost:${PORT}`)
-);
+app.listen(PORT, "0.0.0.0", () => {
+  console.log(`🚀 Server running on port ${PORT}`);
+});

@@ -21,46 +21,52 @@ const generateTokens = (id, role) => {
 export const login = async (req, res, next) => {
   try {
     const { username, password } = req.body;
-    if (!username || !password) {
-      return res.status(400).json({ success: false, message: "Username and password required" });
+    
+    // 1. Try finding in Librarians first
+    let [[user]] = await pool.query("SELECT * FROM Librarians WHERE username = ?", [username]);
+    let role = user?.role || 'staff'; 
+    let idField = 'librarian_id';
+
+    // 2. If not found, try Faculty (HR/Staff)
+    if (!user) {
+      [[user]] = await pool.query("SELECT * FROM Faculty WHERE employee_no = ?", [username]);
+      role = 'faculty';
+      idField = 'faculty_id';
     }
 
-    const [[librarian]] = await pool.query(
-      "SELECT * FROM Librarians WHERE username = ?",
-      [username]
-    );
-
-    if (!librarian) {
-      return res.status(401).json({ success: false, message: "Invalid credentials" });
+    // 3. If still not found, try Students
+    if (!user) {
+      [[user]] = await pool.query("SELECT * FROM Students WHERE registration_no = ?", [username]);
+      role = 'student';
+      idField = 'student_id';
     }
 
-    const isMatch = await bcrypt.compare(password, librarian.password);
+    if (!user) return res.status(401).json({ success: false, message: "User not found" });
+
+    // 4. Comparison with strict string conversion
+    const dbHash = user.password.toString().trim();
+    const isMatch = await bcrypt.compare(password, dbHash);
+
     if (!isMatch) {
-      return res.status(401).json({ success: false, message: "Invalid credentials" });
+      console.log(`❌ Match Failed for ${username}. Hash: ${dbHash}`);
+      return res.status(401).json({ success: false, message: "Invalid password" });
     }
 
-    const { accessToken, refreshToken } = generateTokens(librarian.librarian_id, librarian.role);
+    // 5. Success - Generate Tokens
+    const { accessToken, refreshToken } = generateTokens(user[idField], role);
 
-    // Refresh token → HttpOnly cookie (XSS safe)
     res.cookie("refreshToken", refreshToken, {
       httpOnly: true,
-      secure:   process.env.NODE_ENV === "production",
+      secure: process.env.NODE_ENV === "production",
       sameSite: "strict",
-      maxAge:   7 * 24 * 60 * 60 * 1000, // 7 days
+      maxAge: 7 * 24 * 60 * 60 * 1000, 
     });
 
     res.json({
       success: true,
-      data: {
-        accessToken,
-        librarian: {
-          id:       librarian.librarian_id,
-          name:     librarian.name,
-          username: librarian.username,
-          role:     librarian.role,
-        },
-      },
+      data: { accessToken, user: { id: user[idField], name: user.name, role } }
     });
+
   } catch (err) {
     next(err);
   }

@@ -3,7 +3,10 @@
 -- Creation Order: Respects all Foreign Key dependencies
 -- ============================================================
 
-CREATE DATABASE IF NOT EXISTS university_library;
+
+-- Added: Drop existing database to ensure a clean slate
+DROP DATABASE IF EXISTS university_library;
+CREATE DATABASE university_library;
 USE university_library;
 
 -- ============================================================
@@ -44,11 +47,11 @@ CREATE TABLE Librarians (
 );
 
 CREATE TABLE Borrowing_Policy (
-  policy_id         INT PRIMARY KEY AUTO_INCREMENT,
-  member_type       ENUM('student', 'faculty') NOT NULL UNIQUE,
-  max_books_allowed INT NOT NULL,
-  loan_duration_days INT,             -- NULL = no limit (faculty)
-  fine_per_day      DECIMAL(5,2) NOT NULL DEFAULT 0.00
+  policy_id          INT PRIMARY KEY AUTO_INCREMENT,
+  member_type        ENUM('student', 'faculty') NOT NULL UNIQUE,
+  max_books_allowed  INT NOT NULL,
+  loan_duration_days INT,              -- NULL = no limit (faculty)
+  fine_per_day       DECIMAL(5,2) NOT NULL DEFAULT 0.00
 );
 
 -- ============================================================
@@ -85,14 +88,14 @@ CREATE TABLE Faculty (
 );
 
 CREATE TABLE Books (
-  book_id          INT PRIMARY KEY AUTO_INCREMENT,
-  title            VARCHAR(200) NOT NULL,
-  isbn             VARCHAR(20) UNIQUE,
-  edition          VARCHAR(50),
-  publication_year INT,
-  publisher_id     INT,
-  category_id      INT,
-  created_at       TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  book_id           INT PRIMARY KEY AUTO_INCREMENT,
+  title             VARCHAR(200) NOT NULL,
+  isbn              VARCHAR(20) UNIQUE,
+  edition           VARCHAR(50),
+  publication_year  INT,
+  publisher_id      INT,
+  category_id       INT,
+  created_at        TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (publisher_id) REFERENCES Publishers(publisher_id)
     ON DELETE SET NULL ON UPDATE CASCADE,
   FOREIGN KEY (category_id) REFERENCES Categories(category_id)
@@ -105,26 +108,35 @@ CREATE TABLE Books (
 -- LEVEL 3: References Level 1 & 2
 -- ============================================================
 
--- EXCLUSIVE ARC: exactly one of (student_id, faculty_id) must be NOT NULL
 CREATE TABLE Library_Members (
   member_id       INT PRIMARY KEY AUTO_INCREMENT,
   member_type     ENUM('student', 'faculty') NOT NULL,
-  student_id      INT UNIQUE,            -- nullable FK
-  faculty_id      INT UNIQUE,            -- nullable FK
+  student_id      INT UNIQUE,
+  faculty_id      INT UNIQUE,
   membership_date DATE NOT NULL,
   status          ENUM('active', 'suspended') NOT NULL DEFAULT 'active',
   created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (student_id) REFERENCES Students(student_id)
     ON DELETE CASCADE ON UPDATE CASCADE,
   FOREIGN KEY (faculty_id) REFERENCES Faculty(faculty_id)
-    ON DELETE CASCADE ON UPDATE CASCADE,
-  -- Exclusive Arc Constraint: exactly one FK must be NOT NULL
-  CONSTRAINT chk_exclusive_arc
-    CHECK (
-      (student_id IS NOT NULL AND faculty_id IS NULL) OR
-      (student_id IS NULL AND faculty_id IS NOT NULL)
-    )
+    ON DELETE CASCADE ON UPDATE CASCADE
 );
+
+-- EXCLUSIVE ARC TRIGGER (Replaces CHECK constraint for Linux/Docker compatibility)
+DELIMITER //
+
+CREATE TRIGGER trg_library_members_arc
+BEFORE INSERT ON Library_Members
+FOR EACH ROW
+BEGIN
+    IF (NEW.student_id IS NOT NULL AND NEW.faculty_id IS NOT NULL) OR 
+       (NEW.student_id IS NULL AND NEW.faculty_id IS NULL) THEN
+        SIGNAL SQLSTATE '45000' 
+        SET MESSAGE_TEXT = 'Exclusive Arc Violation: Exactly one of student_id or faculty_id must be provided.';
+    END IF;
+END; //
+
+DELIMITER ;
 
 CREATE TABLE Book_Copies (
   copy_id        INT PRIMARY KEY AUTO_INCREMENT,
@@ -139,11 +151,10 @@ CREATE TABLE Book_Copies (
   INDEX idx_copy_status (status)
 );
 
--- Bridge table for M:N Books <-> Authors
 CREATE TABLE Book_Authors (
   book_id      INT NOT NULL,
   author_id    INT NOT NULL,
-  author_order INT NOT NULL DEFAULT 1,  -- 1=first/primary author
+  author_order INT NOT NULL DEFAULT 1,
   PRIMARY KEY (book_id, author_id),
   FOREIGN KEY (book_id) REFERENCES Books(book_id)
     ON DELETE CASCADE ON UPDATE CASCADE,
@@ -152,7 +163,7 @@ CREATE TABLE Book_Authors (
 );
 
 -- ============================================================
--- LEVEL 4: Final Level (References everything above)
+-- LEVEL 4: Final Level
 -- ============================================================
 
 CREATE TABLE Issue_Transactions (
@@ -162,7 +173,7 @@ CREATE TABLE Issue_Transactions (
   librarian_id INT NOT NULL,
   issue_date   DATE NOT NULL DEFAULT (CURRENT_DATE),
   due_date     DATE NOT NULL,
-  return_date  DATE,                    -- NULL = not yet returned
+  return_date  DATE,
   fine_amount  DECIMAL(8,2) DEFAULT 0.00,
   created_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (copy_id) REFERENCES Book_Copies(copy_id)
@@ -177,7 +188,7 @@ CREATE TABLE Issue_Transactions (
 );
 
 -- ============================================================
--- VIEWS (Avoid storing derived data)
+-- VIEWS
 -- ============================================================
 
 CREATE VIEW vw_book_availability AS
@@ -185,33 +196,14 @@ CREATE VIEW vw_book_availability AS
     b.book_id, b.title, b.isbn, b.edition, b.publication_year,
     p.publisher_name,
     c.category_name,
-    COUNT(bc.copy_id)                                              AS total_copies,
-    SUM(CASE WHEN bc.status = 'available' THEN 1 ELSE 0 END)      AS available_copies
+    COUNT(bc.copy_id) AS total_copies,
+    SUM(CASE WHEN bc.status = 'available' THEN 1 ELSE 0 END) AS available_copies
   FROM Books b
   LEFT JOIN Book_Copies bc ON b.book_id = bc.book_id
   LEFT JOIN Publishers p   ON b.publisher_id = p.publisher_id
   LEFT JOIN Categories c   ON b.category_id = c.category_id
   GROUP BY b.book_id, b.title, b.isbn, b.edition,
            b.publication_year, p.publisher_name, c.category_name;
-
-CREATE VIEW vw_overdue_transactions AS
-  SELECT
-    it.issue_id, b.title, bc.barcode,
-    COALESCE(s.name, f.name)   AS borrower_name,
-    COALESCE(s.email, f.email) AS borrower_email,
-    lm.member_type,
-    it.issue_date, it.due_date,
-    DATEDIFF(CURRENT_DATE, it.due_date) AS days_overdue,
-    (DATEDIFF(CURRENT_DATE, it.due_date) * bp.fine_per_day) AS accrued_fine
-  FROM Issue_Transactions it
-  JOIN Book_Copies bc        ON it.copy_id = bc.copy_id
-  JOIN Books b               ON bc.book_id = b.book_id
-  JOIN Library_Members lm    ON it.member_id = lm.member_id
-  JOIN Borrowing_Policy bp   ON lm.member_type = bp.member_type
-  LEFT JOIN Students s       ON lm.student_id = s.student_id
-  LEFT JOIN Faculty f        ON lm.faculty_id = f.faculty_id
-  WHERE it.return_date IS NULL AND it.due_date < CURRENT_DATE
-  ORDER BY days_overdue DESC;
 
 -- ============================================================
 -- SEED DATA
@@ -234,5 +226,5 @@ INSERT INTO Borrowing_Policy (member_type, max_books_allowed, loan_duration_days
   ('faculty', 10, NULL, 0.00);
 
 INSERT INTO Librarians (name, username, password, role) VALUES
-  ('Admin User', 'admin', '$2b$10$examplehashhere', 'admin'),
-  ('Staff One', 'staff1', '$2b$10$examplehashhere', 'staff');
+  ('Admin User', 'admin', '$2b$10$76.Z9/j/uK5WbX5y9.5u9O6PjQv1.vG8F6aR1pG8F6aR1pG8F6aR1', 'admin'),
+  ('Staff One', 'staff1', '$2b$10$76.Z9/j/uK5WbX5y9.5u9O6PjQv1.vG8F6aR1pG8F6aR1pG8F6aR1', 'staff');
