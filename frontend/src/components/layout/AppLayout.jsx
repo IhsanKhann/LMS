@@ -20,7 +20,7 @@ export default function AppLayout() {
 
   const handleLogout = async () => {
     await dispatch(logoutThunk());
-    navigate("/login");
+    navigate("/dashboard");
   };
 
   const filteredNav = NAV.filter(

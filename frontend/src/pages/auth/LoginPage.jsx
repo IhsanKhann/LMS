@@ -2,7 +2,7 @@
 import { useState, useEffect } from "react";
 import { useDispatch, useSelector } from "react-redux";
 import { useNavigate, useLocation } from "react-router-dom";
-import { loginThunk } from "../../store/slices/authSlice.js";
+// import { loginThunk } from "../../store/slices/authSlice.js";
 
 // ── Floating label input ─────────────────────────────────────────────────────
 function FloatingInput({ id, label, type = "text", value, onChange, autoComplete }) {
@@ -166,11 +166,20 @@ export default function LoginPage() {
   const dispatch = useDispatch();
   const navigate = useNavigate();
   const location = useLocation();
-  const { loading, error } = useSelector((s) => s.auth);
+  
+  // 1. Pulling 'isAuthenticated' to prevent loops
+  const { loading, error, isAuthenticated } = useSelector((s) => s.auth);
   const from = location.state?.from?.pathname || "/dashboard";
 
-  const [form,  setForm]  = useState({ username: "", password: "" });
+  const [form, setForm] = useState({ username: "", password: "" });
   const [shake, setShake] = useState(false);
+
+  // 2. Redirect if already logged in (prevents landing on login while active)
+  useEffect(() => {
+    if (isAuthenticated) {
+      navigate(from, { replace: true });
+    }
+  }, [isAuthenticated, navigate, from]);
 
   useEffect(() => {
     if (error) {
@@ -180,10 +189,33 @@ export default function LoginPage() {
     }
   }, [error]);
 
+  // 3. Refactored Submission Logic
   const handleSubmit = async (e) => {
-    e.preventDefault();
-    const res = await dispatch(loginThunk(form));
-    if (loginThunk.fulfilled.match(res)) navigate(from, { replace: true });
+    // Stop the browser from refreshing the page immediately
+    if (e) e.preventDefault();
+
+    // Prevent double-taps if already loading
+    if (loading) return;
+
+    // Sanitize input: Trim whitespace to match the backend/DB trim logic
+    const credentials = {
+      username: form.username.trim(),
+      password: form.password // Don't trim passwords (spaces can be intentional)
+    };
+
+    try {
+      // .unwrap() is cleaner for handling successful navigation in Thunks
+      const resultAction = await dispatch(loginThunk(credentials));
+      
+      if (loginThunk.fulfilled.match(resultAction)) {
+        // Success: The useEffect above will handle the redirect, 
+        // but explicit navigation here is safer.
+        navigate(from, { replace: true });
+      }
+    } catch (err) {
+      // Errors are handled by the Redux 'error' state, which triggers the shake effect
+      console.error("Login sequence encountered an error:", err);
+    }
   };
 
   return (

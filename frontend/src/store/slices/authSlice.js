@@ -1,46 +1,35 @@
-// src/store/slices/authSlice.js
 import { createSlice, createAsyncThunk } from "@reduxjs/toolkit";
-import api from "../../api/axios.js";
 
-export const loginThunk = createAsyncThunk(
-  "auth/login",
-  async (credentials, { rejectWithValue }) => {
-    try {
-      const { data } = await api.post("/auth/login", credentials);
-      localStorage.setItem("accessToken", data.data.accessToken);
-      return data.data.librarian;
-    } catch (err) {
-      return rejectWithValue(err.response?.data?.message || "Login failed");
-    }
-  }
-);
-
+// Simulate logout
 export const logoutThunk = createAsyncThunk("auth/logout", async () => {
-  await api.post("/auth/logout");
   localStorage.removeItem("accessToken");
 });
 
 const authSlice = createSlice({
   name: "auth",
   initialState: {
-    librarian: null,
-    loading:   false,
-    error:     null,
+    // Hardcoded test librarian: ensures frontend always thinks user is logged in
+    librarian: {
+      librarian_id: 1,
+      name: "Test Librarian",
+      username: "test",
+      role: "admin", // Change to "staff", "student", "faculty" to test different routes
+    },
+    loading: false,
+    error: null,
   },
   reducers: {
-    setLibrarian: (state, action) => { state.librarian = action.payload; },
-    clearError:   (state)          => { state.error = null; },
+    setLibrarian: (state, action) => {
+      state.librarian = action.payload;
+    },
+    clearError: (state) => {
+      state.error = null;
+    },
   },
   extraReducers: (builder) => {
-    builder
-      .addCase(loginThunk.pending,   (state) => { state.loading = true; state.error = null; })
-      .addCase(loginThunk.fulfilled, (state, { payload }) => {
-        state.loading = false; state.librarian = payload;
-      })
-      .addCase(loginThunk.rejected,  (state, { payload }) => {
-        state.loading = false; state.error = payload;
-      })
-      .addCase(logoutThunk.fulfilled, (state) => { state.librarian = null; });
+    builder.addCase(logoutThunk.fulfilled, (state) => {
+      state.librarian = null;
+    });
   },
 });
 

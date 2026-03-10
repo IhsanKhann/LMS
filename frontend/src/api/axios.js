@@ -2,40 +2,27 @@
 import axios from "axios";
 
 const api = axios.create({
-  baseURL:         import.meta.env.VITE_API_URL,
-  withCredentials: true,  // sends HttpOnly refresh-token cookie automatically
+  baseURL: import.meta.env.VITE_API_URL,
+  withCredentials: true, // only needed for refresh cookies
 });
 
-// Attach access token to every request
+// ── DEV: skip attaching token if none exists
 api.interceptors.request.use((config) => {
   const token = localStorage.getItem("accessToken");
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
+  } else {
+    // Dev mode: skip auth header to avoid breaking requests
+    // console.log("No token, proceeding without Authorization header");
   }
   return config;
 });
 
-// Auto-refresh on 401: silently get new access token then retry
+// ── DEV: skip auto-refresh in dev mode
 api.interceptors.response.use(
   (response) => response,
   async (error) => {
-    const original = error.config;
-    if (error.response?.status === 401 && !original._retry) {
-      original._retry = true;
-      try {
-        const { data } = await axios.post(
-          `${import.meta.env.VITE_API_URL}/auth/refresh`,
-          {},
-          { withCredentials: true }
-        );
-        localStorage.setItem("accessToken", data.data.accessToken);
-        original.headers.Authorization = `Bearer ${data.data.accessToken}`;
-        return api(original);
-      } catch {
-        localStorage.removeItem("accessToken");
-        window.location.href = "/login";
-      }
-    }
+    // You can choose to skip refresh for dev mode
     return Promise.reject(error);
   }
 );

@@ -1,7 +1,7 @@
 // src/pages/books/BookDetail.jsx
 import { useEffect, useState } from "react";
 import { useParams, Link }     from "react-router-dom";
-import api from "../../src/api/axios.js";
+import api from "../../api/axios.js"
 
 export default function BookDetail() {
   const { id }    = useParams();
