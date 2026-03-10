@@ -5,11 +5,26 @@ import { useDispatch, useSelector }     from "react-redux";
 import { logoutThunk }     from "../../store/slices/authSlice.js";
 
 const NAV = [
-  { to: "/dashboard",    label: "Dashboard",     icon: "⊞" },
-  { to: "/books",        label: "Catalog",        icon: "📚" },
-  { to: "/members",      label: "Members",        icon: "👥" },
-  { to: "/transactions", label: "Transactions",   icon: "↔" },
-  { to: "/overdue",      label: "Overdue",        icon: "⚠",  adminOnly: true },
+  { to: "/dashboard",    label: "Dashboard",        icon: "⊞" },
+  { to: "/books",        label: "Catalog",          icon: "📚" },
+  
+  // New Management Routes
+  { 
+    to: "/books/manage", 
+    label: "Manage Inventory", 
+    icon: "⚙️", 
+    staffOnly: true // Visible to Admin & Staff
+  },
+  { 
+    to: "/books/new",    
+    label: "Add New Book",    
+    icon: "➕", 
+    staffOnly: true // Visible to Admin & Staff
+  },
+
+  { to: "/members",      label: "Members",          icon: "👥", staffOnly: true },
+  { to: "/transactions", label: "Transactions",     icon: "↔", staffOnly: true },
+  { to: "/overdue",      label: "Overdue",          icon: "⚠", adminOnly: true },
 ];
 
 export default function AppLayout() {

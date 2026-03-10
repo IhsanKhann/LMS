@@ -29,7 +29,7 @@ const router = createBrowserRouter([
   { path: "/login", element: <LoginPage /> },
   { path: "/unauthorized", element: <UnauthorizedPage /> },
 
-  // Authenticated routes
+  // 1. Authenticated routes (Everyone: admin, staff, student, faculty)
   {
     element: <ProtectedRoute allowedRoles={["admin", "staff", "student", "faculty"]} />,
     children: [
@@ -45,7 +45,7 @@ const router = createBrowserRouter([
     ],
   },
 
-  // Admin & Staff routes
+  // 2. Admin & Staff routes (Management)
   {
     element: <ProtectedRoute allowedRoles={["admin", "staff"]} />,
     children: [
@@ -54,15 +54,17 @@ const router = createBrowserRouter([
         children: [
           { path: "/members", element: <MembersPage /> },
           { path: "/transactions", element: <TransactionsPage /> },
-          { path: "/books/manage", element: <BookList /> },
-          { path: "/books/new", element: <BookForm /> },
-          { path: "/books/:id/edit", element: <BookForm /> },
+          
+          // --- BOOK MANAGEMENT ROUTES ---
+          { path: "/books/manage", element: <BookList /> },   // The table view of books
+          { path: "/books/new", element: <BookForm /> },      // The "Add Book" form
+          { path: "/books/:id/edit", element: <BookForm /> }, // The "Edit Book" form
         ],
       },
     ],
   },
 
-  // Admin-only routes
+  // 3. Admin-only routes
   {
     element: <ProtectedRoute allowedRoles={["admin"]} />,
     children: [
