@@ -1,16 +1,13 @@
-version: "3.9"
-
 services:
-
   db:
     image: mysql:8
-    command: --lower_case_table_names=1  # <--- Add this line to ensure case-insensitive table names
+    command: --lower_case_table_names=1
     restart: unless-stopped
     environment:
       MYSQL_ROOT_PASSWORD: ${DB_PASSWORD:-LibraryPass2024!}
       MYSQL_DATABASE: ${DB_NAME:-university_library}
     ports:
-      - "3307:3306"          # 3307 = Workbench access from host; 3306 = internal Docker
+      - "3307:3306"
     volumes:
       - db-data:/var/lib/mysql
       - ./database/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
@@ -22,6 +19,8 @@ services:
       start_period: 30s
 
   backend:
+    # Set to your specific Docker Hub repo with a 'backend' tag
+    image: ihsankhann/lms:backend
     build:
       context: ./backend
       dockerfile: Dockerfile
@@ -30,27 +29,26 @@ services:
     environment:
       NODE_ENV: development
       PORT: 3000
-      # ── DB uses service name "db", NOT "localhost" ──
       DB_HOST: db
       DB_PORT: 3306
       DB_USER: root
       DB_PASSWORD: ${DB_PASSWORD:-LibraryPass2024!}
       DB_NAME: ${DB_NAME:-university_library}
-      # ── Auth secrets ──
       JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:-dev_access_secret_change_me}
       JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:-dev_refresh_secret_change_me}
       JWT_ACCESS_EXPIRES: 15m
       JWT_REFRESH_EXPIRES: 7d
-      # ── CORS ──
       CLIENT_ORIGIN: http://localhost:5174
     depends_on:
       db:
         condition: service_healthy
     volumes:
       - ./backend:/app
-      - /app/node_modules   # anonymous volume keeps container node_modules isolated
+      - /app/node_modules
 
   frontend:
+    # Set to your specific Docker Hub repo with a 'frontend' tag
+    image: ihsankhann/lms:frontend
     build:
       context: ./frontend
       dockerfile: Dockerfile
