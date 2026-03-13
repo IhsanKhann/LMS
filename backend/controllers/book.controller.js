@@ -13,51 +13,52 @@ export const getBooks = async (req, res, next) => {
     const params = [];
     let where = "WHERE 1=1";
 
+    // IMPORTANT: Use "b." prefix to avoid ambiguity
     if (search) {
-      where += " AND (b.title LIKE ? OR b.isbn LIKE ? OR a.author_name LIKE ?)";
-      params.push(`%${search}%`, `%${search}%`, `%${search}%`);
+      where += " AND (b.title LIKE ? OR b.isbn LIKE ?)";
+      params.push(`%${search}%`, `%${search}%`);
     }
     if (category_id) {
       where += " AND b.category_id = ?";
       params.push(category_id);
     }
 
+    // Main Query
     const [rows] = await pool.query(
       `SELECT
-         b.book_id,
-         b.title,
-         b.isbn,
-         b.edition,
-         b.publication_year,
-         p.publisher_name,
-         c.category_id,
-         c.category_name,
-         GROUP_CONCAT(a.author_name ORDER BY ba.author_order SEPARATOR ', ') AS authors,
-         COUNT(DISTINCT bc.copy_id)                                           AS total_copies,
-         SUM(CASE WHEN bc.status = 'available' THEN 1 ELSE 0 END)            AS available_copies
+          b.book_id,
+          b.title,
+          b.isbn,
+          b.edition,
+          b.publication_year,
+          p.publisher_name,
+          c.category_id,
+          c.category_name,
+          (SELECT GROUP_CONCAT(a.author_name SEPARATOR ', ') 
+           FROM Book_Authors ba 
+           JOIN Authors a ON ba.author_id = a.author_id 
+           WHERE ba.book_id = b.book_id) AS authors,
+          COUNT(DISTINCT bc.copy_id) AS total_copies,
+          SUM(CASE WHEN bc.status = 'available' THEN 1 ELSE 0 END) AS available_copies
        FROM Books b
        LEFT JOIN Publishers p    ON b.publisher_id  = p.publisher_id
        LEFT JOIN Categories c    ON b.category_id   = c.category_id
-       LEFT JOIN Book_Authors ba ON b.book_id        = ba.book_id
-       LEFT JOIN Authors a       ON ba.author_id     = a.author_id
-       LEFT JOIN Book_Copies bc  ON b.book_id        = bc.book_id
+       LEFT JOIN Book_Copies bc  ON b.book_id       = bc.book_id
        ${where}
-       GROUP BY b.book_id, b.title, b.isbn, b.edition, b.publication_year,
-                p.publisher_name, c.category_id, c.category_name
+       GROUP BY b.book_id, p.publisher_name, c.category_id
        ORDER BY b.title
        LIMIT ? OFFSET ?`,
       [...params, Number(limit), Number(offset)]
     );
 
-    // Count query (no LIMIT)
-    const [[{ total }]] = await pool.query(
-      `SELECT COUNT(DISTINCT b.book_id) AS total
-       FROM Books b
-       LEFT JOIN Book_Authors ba ON b.book_id   = ba.book_id
-       LEFT JOIN Authors a       ON ba.author_id = a.author_id
-       ${where}`,
+    // Fixed Count Query: Simple and direct
+    const [countResult] = await pool.query(
+      `SELECT COUNT(*) AS total FROM Books b ${where}`,
       params
     );
+    
+    // Check if countResult exists to prevent "cannot destructure property total"
+    const total = countResult[0]?.total || 0;
 
     res.json({
       success: true,
@@ -70,7 +71,8 @@ export const getBooks = async (req, res, next) => {
       },
     });
   } catch (err) {
-    next(err);
+    console.error("SQL Error in getBooks:", err.message);
+    next(err); // This will now send the actual error to your frontend
   }
 };
 

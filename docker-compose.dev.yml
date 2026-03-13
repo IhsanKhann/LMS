@@ -4,7 +4,8 @@ services:
     command: --lower_case_table_names=1
     restart: unless-stopped
     environment:
-      MYSQL_ROOT_PASSWORD: ${DB_PASSWORD:-LibraryPass2024!}
+      # Updated default password to match your preference
+      MYSQL_ROOT_PASSWORD: ${DB_PASSWORD:-Mintfever28@ihsan}
       MYSQL_DATABASE: ${DB_NAME:-university_library}
     ports:
       - "3307:3306"
@@ -12,14 +13,14 @@ services:
       - db-data:/var/lib/mysql
       - ./database/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${DB_PASSWORD:-LibraryPass2024!}"]
+      # Updated healthcheck password to match
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${DB_PASSWORD:-Mintfever28@ihsan}"]
       interval: 5s
       timeout: 5s
       retries: 15
       start_period: 30s
 
   backend:
-    # Set to your specific Docker Hub repo with a 'backend' tag
     image: ihsankhann/lms:backend
     build:
       context: ./backend
@@ -32,7 +33,7 @@ services:
       DB_HOST: db
       DB_PORT: 3306
       DB_USER: root
-      DB_PASSWORD: ${DB_PASSWORD:-LibraryPass2024!}
+      DB_PASSWORD: ${DB_PASSWORD:-Mintfever28@ihsan}
       DB_NAME: ${DB_NAME:-university_library}
       JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:-dev_access_secret_change_me}
       JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:-dev_refresh_secret_change_me}
@@ -47,7 +48,6 @@ services:
       - /app/node_modules
 
   frontend:
-    # Set to your specific Docker Hub repo with a 'frontend' tag
     image: ihsankhann/lms:frontend
     build:
       context: ./frontend

@@ -5,26 +5,21 @@ import { useDispatch, useSelector }     from "react-redux";
 import { logoutThunk }     from "../../store/slices/authSlice.js";
 
 const NAV = [
-  { to: "/dashboard",    label: "Dashboard",        icon: "⊞" },
-  { to: "/books",        label: "Catalog",          icon: "📚" },
-  
-  // New Management Routes
-  { 
-    to: "/books/manage", 
-    label: "Manage Inventory", 
-    icon: "⚙️", 
-    staffOnly: true // Visible to Admin & Staff
-  },
-  { 
-    to: "/books/new",    
-    label: "Add New Book",    
-    icon: "➕", 
-    staffOnly: true // Visible to Admin & Staff
-  },
+  { to: "/dashboard",      label: "Dashboard",        icon: "⊞" },
+  { to: "/books",          label: "Catalog",          icon: "📚" },
 
-  { to: "/members",      label: "Members",          icon: "👥", staffOnly: true },
-  { to: "/transactions", label: "Transactions",     icon: "↔", staffOnly: true },
-  { to: "/overdue",      label: "Overdue",          icon: "⚠", adminOnly: true },
+  // Book management (staff/admin only)
+  { to: "/books/manage",   label: "Manage Inventory", icon: "⚙️",  staffOnly: true },
+  { to: "/books/new",      label: "Add New Book",     icon: "➕",  staffOnly: true },
+
+  // People (staff/admin only)
+  { to: "/members",        label: "Members",          icon: "👥",  staffOnly: true },
+  { to: "/students",       label: "Students",         icon: "🎓",  staffOnly: true },
+  { to: "/faculty",        label: "Faculty",          icon: "🏫",  staffOnly: true },
+
+  // Transactions
+  { to: "/transactions",   label: "Transactions",     icon: "↔",   staffOnly: true },
+  { to: "/overdue",        label: "Overdue",          icon: "⚠",   adminOnly: true },
 ];
 
 export default function AppLayout() {
@@ -38,9 +33,14 @@ export default function AppLayout() {
     navigate("/dashboard");
   };
 
-  const filteredNav = NAV.filter(
-    (n) => !n.adminOnly || librarian?.role === "admin"
-  );
+  const isAdmin  = librarian?.role === "admin";
+  const isStaff  = librarian?.role === "admin" || librarian?.role === "staff";
+
+  const filteredNav = NAV.filter((n) => {
+    if (n.adminOnly) return isAdmin;
+    if (n.staffOnly) return isStaff;
+    return true;
+  });
 
   return (
     <div className="flex h-screen bg-surface overflow-hidden font-body">
@@ -66,6 +66,7 @@ export default function AppLayout() {
             <NavLink
               key={n.to}
               to={n.to}
+              end={n.to === "/books"}   // avoid /books matching /books/manage etc.
               className={({ isActive }) =>
                 `flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors
                  ${isActive

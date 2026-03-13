@@ -12,6 +12,9 @@ import memberRoutes      from "./routes/member.routes.js";
 import transactionRoutes from "./routes/transaction.routes.js";
 import departmentRoutes  from "./routes/department.routes.js";
 
+import studentRoutes from "./routes/student.routes.js";
+import facultyRoutes from "./routes/faculty.routes.js";
+
 dotenv.config();
 
 const app  = express();
@@ -57,6 +60,8 @@ app.use("/api/books",        bookRoutes);
 app.use("/api/members",      memberRoutes);
 app.use("/api/transactions", transactionRoutes);
 app.use("/api/departments",  departmentRoutes);
+app.use("/api/students", studentRoutes);
+app.use("/api/faculty", facultyRoutes);
 
 // ── Global error handler ──────────────────────────────────────────────────────
 app.use((err, _req, res, _next) => {
