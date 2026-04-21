@@ -114,12 +114,14 @@ CREATE TABLE `Library_Members` (
   CONSTRAINT `fk_member_faculty` FOREIGN KEY (`faculty_id`) REFERENCES `Faculty`(`faculty_id`) ON DELETE CASCADE ON UPDATE CASCADE
 ) ENGINE=InnoDB;
 
--- ARC Trigger for exclusive membership
+-- ARC Trigger: enforce exactly one of student_id / faculty_id
 DELIMITER //
 CREATE TRIGGER `trg_member_exclusive_arc` BEFORE INSERT ON `Library_Members` FOR EACH ROW 
 BEGIN 
-    IF (NEW.student_id IS NOT NULL AND NEW.faculty_id IS NOT NULL) OR (NEW.student_id IS NULL AND NEW.faculty_id IS NULL) THEN 
-        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Must set exactly one of student_id or faculty_id'; 
+    IF (NEW.student_id IS NOT NULL AND NEW.faculty_id IS NOT NULL)
+       OR (NEW.student_id IS NULL AND NEW.faculty_id IS NULL) THEN 
+        SIGNAL SQLSTATE '45000'
+          SET MESSAGE_TEXT = 'Must set exactly one of student_id or faculty_id'; 
     END IF; 
 END//
 DELIMITER ;
@@ -161,35 +163,100 @@ CREATE TABLE `Issue_Transactions` (
 
 -- ============================================================
 -- SEED DATA
+-- Dummy credentials:
+--   admin    username: admin      password: admin123
+--   staff    username: staff1     password: staff123
+--   student  email: ali.hassan@uni.edu  / reg: CS-2021-001  password: student123
+--   faculty  email: irfan.malik@uni.edu / emp: FAC-001       password: faculty123
 -- ============================================================
 SET FOREIGN_KEY_CHECKS = 1;
 
-INSERT INTO `Department` (`department_name`) VALUES ('Computer Science'), ('Mathematics'), ('Physics');
-INSERT INTO `Publishers` (`publisher_name`) VALUES ('MIT Press'), ('O\'Reilly Media'), ('Pearson');
-INSERT INTO `Categories` (`category_name`) VALUES ('Algorithms'), ('Networking'), ('Database');
-INSERT INTO `Authors` (`author_name`) VALUES ('Thomas H. Cormen'), ('Robert C. Martin'), ('Andrew Tanenbaum');
+INSERT INTO `Department` (`department_name`) VALUES
+  ('Computer Science'),
+  ('Mathematics'),
+  ('Physics'),
+  ('Electrical Engineering'),
+  ('Business Administration');
 
-INSERT INTO `Borrowing_Policy` (`member_type`, `max_books_allowed`, `loan_duration_days`, `fine_per_day`) VALUES 
-('student', 5, 14, 1.00), ('faculty', 10, NULL, 0.00);
+INSERT INTO `Publishers` (`publisher_name`) VALUES
+  ('MIT Press'),
+  ('O''Reilly Media'),
+  ('Pearson'),
+  ('Wiley'),
+  ('McGraw-Hill');
 
-INSERT INTO `Librarians` (`name`, `username`, `password`, `role`) VALUES 
-('System Admin', 'admin', '$2b$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi', 'admin');
+INSERT INTO `Categories` (`category_name`) VALUES
+  ('Algorithms'),
+  ('Networking'),
+  ('Database'),
+  ('Operating Systems'),
+  ('Software Engineering');
 
-INSERT INTO `Students` (`name`, `registration_no`, `email`, `department_id`, `academic_year`, `password`) VALUES 
-('Ali Hassan', 'CS-2021-001', 'ali.hassan@uni.edu', 1, '3rd Year', 'pass');
+INSERT INTO `Authors` (`author_name`) VALUES
+  ('Thomas H. Cormen'),
+  ('Robert C. Martin'),
+  ('Andrew Tanenbaum'),
+  ('Abraham Silberschatz'),
+  ('Ian Sommerville');
 
-INSERT INTO `Faculty` (`name`, `employee_no`, `email`, `department_id`, `designation`, `password`) VALUES 
-('Dr. Irfan Malik', 'FAC-001', 'irfan.malik@uni.edu', 1, 'Associate Professor', 'pass');
+INSERT INTO `Borrowing_Policy` (`member_type`, `max_books_allowed`, `loan_duration_days`, `fine_per_day`) VALUES
+  ('student', 5,  14, 1.00),
+  ('faculty', 10, 30, 0.00);
 
-INSERT INTO `Library_Members` (`member_type`, `student_id`, `faculty_id`, `membership_date`) VALUES 
-('student', 1, NULL, '2021-09-01'), 
-('faculty', NULL, 1, '2021-09-01');
+-- ── Librarians (password: admin123) ──────────────────────────────────────────
+-- Hash below = bcrypt('admin123', 10)
+INSERT INTO `Librarians` (`name`, `username`, `password`, `role`) VALUES
+  ('System Admin',  'admin',  '$2b$10$544MYTvwzP.JMqX7GjmhM.03u1kIRnEoTc5Cw6FA2d73nm14pulzq', 'admin'),
+  ('Sara Khan',     'staff1', '$2b$10$544MYTvwzP.JMqX7GjmhM.03u1kIRnEoTc5Cw6FA2d73nm14pulzq', 'staff');
 
-INSERT INTO `Books` (`title`, `isbn`, `publisher_id`, `category_id`, `edition`) VALUES 
-('Introduction to Algorithms', '978-0262033848', 1, 1, '4th'), 
-('Computer Networks', '978-0133594140', 3, 2, '5th');
+-- ── Students (password: student123) ──────────────────────────────────────────
+-- Hash below = bcrypt('student123', 10)
+INSERT INTO `Students`
+  (`name`, `registration_no`, `email`, `department_id`, `academic_year`, `gender`, `password`, `is_registered`)
+VALUES
+  ('Ali Hassan',   'CS-2021-001', 'ali.hassan@uni.edu',   1, '3rd Year', 'male',   '$2b$10$JUVLoUqKcmZZGg37GzBKrexhjI5I9q63RJLfE5TbHmaT7OHy0rv4e', 1),
+  ('Sara Ahmed',   'CS-2022-002', 'sara.ahmed@uni.edu',   1, '2nd Year', 'female', '$2b$10$JUVLoUqKcmZZGg37GzBKrexhjI5I9q63RJLfE5TbHmaT7OHy0rv4e', 1),
+  ('Bilal Yousuf', 'MT-2020-001', 'bilal.yousuf@uni.edu', 2, '4th Year', 'male',   '$2b$10$JUVLoUqKcmZZGg37GzBKrexhjI5I9q63RJLfE5TbHmaT7OHy0rv4e', 1);
 
-INSERT INTO `Book_Authors` (`book_id`, `author_id`) VALUES (1, 1), (2, 3);
-INSERT INTO `Book_Copies` (`book_id`, `barcode`, `status`, `shelf_location`) VALUES 
-(1, 'CS-001-A', 'available', 'Shelf-A'), 
-(2, 'NW-003-A', 'available', 'Shelf-B');
+-- ── Faculty (password: faculty123) ───────────────────────────────────────────
+-- Hash below = bcrypt('faculty123', 10)
+INSERT INTO `Faculty`
+  (`name`, `employee_no`, `email`, `department_id`, `designation`, `gender`, `password`, `is_registered`)
+VALUES
+  ('Dr. Irfan Malik',  'FAC-001', 'irfan.malik@uni.edu',  1, 'Associate Professor', 'male',   '$2b$10$Ep5g2lE0lEMzaHJ5.bmoMuXj2qQr6XKk9HgRsxbFiB1uLoH8dhQXa', 1),
+  ('Dr. Amna Siddiqui','FAC-002', 'amna.siddiqui@uni.edu',2, 'Assistant Professor', 'female', '$2b$10$Ep5g2lE0lEMzaHJ5.bmoMuXj2qQr6XKk9HgRsxbFiB1uLoH8dhQXa', 1);
+
+-- ── Library Members ───────────────────────────────────────────────────────────
+INSERT INTO `Library_Members` (`member_type`, `student_id`, `faculty_id`, `membership_date`) VALUES
+  ('student', 1, NULL, '2021-09-01'),
+  ('student', 2, NULL, '2022-09-01'),
+  ('student', 3, NULL, '2020-09-01'),
+  ('faculty', NULL, 1,  '2021-09-01'),
+  ('faculty', NULL, 2,  '2022-01-15');
+
+-- ── Books ─────────────────────────────────────────────────────────────────────
+INSERT INTO `Books` (`title`, `isbn`, `publisher_id`, `category_id`, `edition`, `publication_year`) VALUES
+  ('Introduction to Algorithms',         '978-0262033848', 1, 1, '4th', 2022),
+  ('Computer Networks',                  '978-0133594140', 3, 2, '5th', 2011),
+  ('Database System Concepts',           '978-0078022159', 3, 3, '7th', 2019),
+  ('Operating System Concepts',          '978-1118063330', 4, 4, '10th',2018),
+  ('Clean Code',                         '978-0132350884', 2, 5, '1st', 2008),
+  ('Software Engineering',               '978-0133943030', 3, 5, '10th',2015);
+
+INSERT INTO `Book_Authors` (`book_id`, `author_id`, `author_order`) VALUES
+  (1, 1, 1),
+  (2, 3, 1),
+  (3, 4, 1),
+  (4, 4, 1),
+  (5, 2, 1),
+  (6, 5, 1);
+
+INSERT INTO `Book_Copies` (`book_id`, `barcode`, `status`, `shelf_location`) VALUES
+  (1, 'CS-001-A', 'available', 'Shelf-A1'),
+  (1, 'CS-001-B', 'available', 'Shelf-A1'),
+  (2, 'NW-002-A', 'available', 'Shelf-B1'),
+  (3, 'DB-003-A', 'available', 'Shelf-C1'),
+  (3, 'DB-003-B', 'available', 'Shelf-C1'),
+  (4, 'OS-004-A', 'available', 'Shelf-D1'),
+  (5, 'CC-005-A', 'available', 'Shelf-E1'),
+  (6, 'SE-006-A', 'available', 'Shelf-E2');

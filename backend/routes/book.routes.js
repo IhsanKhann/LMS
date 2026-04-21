@@ -16,6 +16,7 @@ router.get("/authors",     checkAuth,                        getAuthors);
 router.get("/search",      checkAuth,                        searchBooks);   // PRD §7.2
 router.get("/",            checkAuth,                        getBooks);
 router.get("/:id",         checkAuth,                        getBook);
+
 router.post("/",           checkAuth, checkRole(["admin"]),  createBook);
 router.put("/:id",         checkAuth, checkRole(["admin"]),  updateBook);
 router.delete("/:id",      checkAuth, checkRole(["admin"]),  deleteBook);

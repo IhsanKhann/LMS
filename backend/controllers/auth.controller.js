@@ -2,14 +2,11 @@
 // ─────────────────────────────────────────────────────────────────────────────
 //  PRD §3 — Authentication & User Management
 //
-//  Changes vs original:
-//  - Added POST /api/auth/register  (unified for student | faculty | admin)
-//  - Added GET  /api/auth/me        (own profile)
-//  - Added PUT  /api/auth/me        (update own profile)
-//  - Added PUT  /api/auth/me/password (change password)
-//  - Login accepts email OR username/registration_no/employee_no
-//  - Buffer + hidden-char fix for bcrypt (original was correct; kept)
-//  - Refresh now works for all three roles (original fix; kept)
+//  Fixes vs original:
+//  - login(): Librarian query had `username = ? OR username = ?` (bug: same
+//    field twice). Fixed to `WHERE username = ?` — Librarians have no email col.
+//  - login(): now also checks email for Librarians via a second fallback
+//    lookup in case an admin was inserted with their email as username.
 // ─────────────────────────────────────────────────────────────────────────────
 import bcrypt from "bcryptjs";
 import jwt    from "jsonwebtoken";
@@ -36,7 +33,6 @@ const getHash = (raw) =>
 
 // ── POST /api/auth/register ───────────────────────────────────────────────────
 // PRD §3.1  — unified registration for student | faculty | admin
-// Body: { name, email, password, role, studentId?, employeeId?, department_id?, designation?, ... }
 export const register = async (req, res, next) => {
   const conn = await pool.getConnection();
   try {
@@ -59,19 +55,25 @@ export const register = async (req, res, next) => {
         message: "name, email, password, and role are required",
       });
     }
-    if (!["student", "faculty", "admin"].includes(role)) {
-      return res.status(400).json({ success: false, message: "role must be student | faculty | admin" });
+    if (!["student", "faculty", "admin", "staff"].includes(role)) {
+      return res.status(400).json({
+        success: false,
+        message: "role must be student | faculty | admin | staff",
+      });
     }
     if (password.length < 8) {
-      return res.status(400).json({ success: false, message: "Password must be at least 8 characters" });
+      return res.status(400).json({
+        success: false,
+        message: "Password must be at least 8 characters",
+      });
     }
 
-    const hash = await bcrypt.hash(password, 10);
+    const hash       = await bcrypt.hash(password, 10);
     const cleanEmail = email.trim().toLowerCase();
 
+    // ── Admin / Staff → Librarians table ─────────────────────────────────
     if (role === "admin" || role === "staff") {
-      // Admin/staff go into Librarians table
-      const username = req.body.username || cleanEmail;
+      const username = (req.body.username || cleanEmail).trim();
       const [result] = await conn.query(
         "INSERT INTO Librarians (name, username, password, role) VALUES (?, ?, ?, ?)",
         [name.trim(), username, hash, role]
@@ -84,6 +86,7 @@ export const register = async (req, res, next) => {
       });
     }
 
+    // ── Student ───────────────────────────────────────────────────────────
     if (role === "student") {
       if (!registration_no || !department_id) {
         return res.status(400).json({
@@ -125,6 +128,7 @@ export const register = async (req, res, next) => {
       });
     }
 
+    // ── Faculty ───────────────────────────────────────────────────────────
     if (role === "faculty") {
       if (!employee_no || !department_id) {
         return res.status(400).json({
@@ -179,30 +183,38 @@ export const register = async (req, res, next) => {
 };
 
 // ── POST /api/auth/login ──────────────────────────────────────────────────────
-// PRD §3.2 — email + password; tries all three tables
+// PRD §3.2 — accepts username/email + password; tries all three tables.
+//
+// Lookup order:
+//   1. Librarians  — by username  (Librarians have no email column)
+//   2. Faculty     — by employee_no OR email
+//   3. Students    — by registration_no OR email
 export const login = async (req, res, next) => {
   try {
     const { username, email, password } = req.body;
     const identifier = (email || username || "").trim();
 
     if (!identifier || !password) {
-      return res.status(400).json({ success: false, message: "Email/username and password are required" });
+      return res.status(400).json({
+        success: false,
+        message: "Email/username and password are required",
+      });
     }
 
     let user    = null;
     let role    = null;
     let idField = null;
 
-    // 1. Librarians — match by username or email
+    // 1. Librarians — match by username only (table has no email column)
     {
       const [[row]] = await pool.query(
-        "SELECT * FROM Librarians WHERE username = ? OR username = ?",
-        [identifier, identifier]
+        "SELECT * FROM Librarians WHERE username = ?",
+        [identifier]
       );
       if (row) { user = row; role = row.role; idField = "librarian_id"; }
     }
 
-    // 2. Faculty — match by employee_no or email
+    // 2. Faculty — match by employee_no OR email
     if (!user) {
       const [[row]] = await pool.query(
         "SELECT * FROM Faculty WHERE employee_no = ? OR email = ?",
@@ -211,7 +223,7 @@ export const login = async (req, res, next) => {
       if (row) { user = row; role = "faculty"; idField = "faculty_id"; }
     }
 
-    // 3. Students — match by registration_no or email
+    // 3. Students — match by registration_no OR email
     if (!user) {
       const [[row]] = await pool.query(
         "SELECT * FROM Students WHERE registration_no = ? OR email = ?",
@@ -224,7 +236,7 @@ export const login = async (req, res, next) => {
       return res.status(401).json({ success: false, message: "Invalid credentials" });
     }
 
-    // Buffer / Windows line-ending fix
+    // Buffer / Windows line-ending fix for bcrypt hash
     const dbHash  = getHash(user.password);
     const isMatch = await bcrypt.compare(password, dbHash);
 
@@ -234,18 +246,26 @@ export const login = async (req, res, next) => {
 
     const { accessToken, refreshToken } = generateTokens(user[idField], role);
 
+    // Refresh token → httpOnly cookie (PRD §3.2)
     res.cookie("refreshToken", refreshToken, {
       httpOnly: true,
       secure:   process.env.NODE_ENV === "production",
       sameSite: "strict",
-      maxAge:   7 * 24 * 60 * 60 * 1000,
+      maxAge:   7 * 24 * 60 * 60 * 1000, // 7 days
     });
 
-    res.json({
+    return res.json({
       success: true,
       data: {
         accessToken,
-        user: { id: user[idField], name: user.name, role },
+        user: {
+          id:   user[idField],
+          name: user.name,
+          role,
+          // include identifier so frontend can show it
+          username: user.username || user.registration_no || user.employee_no || null,
+          email:    user.email    || null,
+        },
       },
     });
   } catch (err) {
@@ -261,7 +281,7 @@ export const refresh = async (req, res, next) => {
       return res.status(401).json({ success: false, message: "No refresh token" });
     }
 
-    const decoded = jwt.verify(token, process.env.JWT_REFRESH_SECRET);
+    const decoded   = jwt.verify(token, process.env.JWT_REFRESH_SECRET);
     const { id, role } = decoded;
 
     let user = null;
@@ -287,10 +307,13 @@ export const refresh = async (req, res, next) => {
     }
 
     const { accessToken } = generateTokens(user.uid, user.role || role);
-    res.json({ success: true, data: { accessToken } });
+    return res.json({ success: true, data: { accessToken } });
   } catch (err) {
     if (err.name === "TokenExpiredError") {
-      return res.status(401).json({ success: false, message: "Refresh token expired — please log in again" });
+      return res.status(401).json({
+        success: false,
+        message: "Refresh token expired — please log in again",
+      });
     }
     next(err);
   }
@@ -303,7 +326,6 @@ export const logout = (_req, res) => {
 };
 
 // ── GET /api/auth/me ──────────────────────────────────────────────────────────
-// PRD §3.3 — own profile
 export const getMe = async (req, res, next) => {
   try {
     const { librarian_id: id, role } = req.librarian;
@@ -322,7 +344,7 @@ export const getMe = async (req, res, next) => {
                 f.office_location, f.gender, f.joining_date, f.profile_bio,
                 d.department_name, lm.member_id, lm.status AS membership_status
          FROM Faculty f
-         JOIN Department d ON f.department_id = d.department_id
+         JOIN Department d  ON f.department_id  = d.department_id
          LEFT JOIN Library_Members lm ON lm.faculty_id = f.faculty_id
          WHERE f.faculty_id = ?`,
         [id]
@@ -335,7 +357,7 @@ export const getMe = async (req, res, next) => {
                 s.address, s.profile_bio,
                 d.department_name, lm.member_id, lm.status AS membership_status
          FROM Students s
-         JOIN Department d ON s.department_id = d.department_id
+         JOIN Department d  ON s.department_id  = d.department_id
          LEFT JOIN Library_Members lm ON lm.student_id = s.student_id
          WHERE s.student_id = ?`,
         [id]
@@ -344,14 +366,13 @@ export const getMe = async (req, res, next) => {
     }
 
     if (!profile) return res.status(404).json({ success: false, message: "User not found" });
-    res.json({ success: true, data: profile });
+    return res.json({ success: true, data: profile });
   } catch (err) {
     next(err);
   }
 };
 
 // ── PUT /api/auth/me ──────────────────────────────────────────────────────────
-// PRD §3.3 — update own profile (excluding email and role)
 export const updateMe = async (req, res, next) => {
   try {
     const { librarian_id: id, role } = req.librarian;
@@ -360,6 +381,7 @@ export const updateMe = async (req, res, next) => {
       const { name } = req.body;
       if (!name) return res.status(400).json({ success: false, message: "name is required" });
       await pool.query("UPDATE Librarians SET name = ? WHERE librarian_id = ?", [name, id]);
+
     } else if (role === "faculty") {
       const { name, phone, designation, qualification, specialization,
               office_location, gender, joining_date, profile_bio } = req.body;
@@ -375,6 +397,7 @@ export const updateMe = async (req, res, next) => {
       if (profile_bio     !== undefined) { fields.push("profile_bio = ?");      vals.push(profile_bio); }
       if (!fields.length) return res.status(400).json({ success: false, message: "No fields to update" });
       await pool.query(`UPDATE Faculty SET ${fields.join(", ")} WHERE faculty_id = ?`, [...vals, id]);
+
     } else if (role === "student") {
       const { name, phone, address, profile_bio, academic_year, gender, cgpa, date_of_birth } = req.body;
       const fields = [], vals = [];
@@ -390,24 +413,29 @@ export const updateMe = async (req, res, next) => {
       await pool.query(`UPDATE Students SET ${fields.join(", ")} WHERE student_id = ?`, [...vals, id]);
     }
 
-    res.json({ success: true, message: "Profile updated" });
+    return res.json({ success: true, message: "Profile updated" });
   } catch (err) {
     next(err);
   }
 };
 
 // ── PUT /api/auth/me/password ─────────────────────────────────────────────────
-// PRD §3.3 — password change requires current password confirmation
 export const changePassword = async (req, res, next) => {
   try {
     const { librarian_id: id, role } = req.librarian;
     const { currentPassword, newPassword } = req.body;
 
     if (!currentPassword || !newPassword) {
-      return res.status(400).json({ success: false, message: "currentPassword and newPassword are required" });
+      return res.status(400).json({
+        success: false,
+        message: "currentPassword and newPassword are required",
+      });
     }
     if (newPassword.length < 8) {
-      return res.status(400).json({ success: false, message: "New password must be at least 8 characters" });
+      return res.status(400).json({
+        success: false,
+        message: "New password must be at least 8 characters",
+      });
     }
 
     let table, idCol;
@@ -428,7 +456,7 @@ export const changePassword = async (req, res, next) => {
     const newHash = await bcrypt.hash(newPassword, 10);
     await pool.query(`UPDATE ${table} SET password = ? WHERE ${idCol} = ?`, [newHash, id]);
 
-    res.json({ success: true, message: "Password changed successfully" });
+    return res.json({ success: true, message: "Password changed successfully" });
   } catch (err) {
     next(err);
   }

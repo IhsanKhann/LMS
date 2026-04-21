@@ -133,44 +133,67 @@ export const registerStudent = async (req, res, next) => {
 export const getStudents = async (req, res, next) => {
   try {
     const { search, department_id, page = 1, limit = 20 } = req.query;
-    const offset = (page - 1) * limit;
+    
+    // 1. Precise Number Parsing
+    const parsedLimit = parseInt(limit, 10) || 20;
+    const parsedPage = parseInt(page, 10) || 1;
+    const offset = (parsedPage - 1) * parsedLimit;
+
     const params = [];
     let where = "WHERE 1=1";
 
+    // 2. Explicit Aliasing
+    // We use 's.' to tell MySQL these columns belong to the Students table
     if (search) {
       where += " AND (s.name LIKE ? OR s.registration_no LIKE ? OR s.email LIKE ?)";
-      params.push(`%${search}%`, `%${search}%`, `%${search}%`);
+      const searchVal = `%${search}%`;
+      params.push(searchVal, searchVal, searchVal);
     }
+    
     if (department_id) {
       where += " AND s.department_id = ?";
       params.push(department_id);
     }
 
+    // 3. Main Query with LEFT JOINs
     const [rows] = await pool.query(
-      `SELECT s.student_id, s.name, s.registration_no, s.email, s.phone,
-              s.academic_year, s.cgpa, s.gender, s.enrollment_date, s.is_registered,
-              d.department_name,
-              lm.member_id, lm.status AS membership_status
+      `SELECT 
+          s.student_id, s.name, s.registration_no, s.email, s.phone,
+          s.academic_year, s.cgpa, s.gender, s.created_at, s.is_registered,
+          d.department_name,
+          lm.member_id, lm.status AS membership_status
        FROM Students s
-       JOIN Department d ON s.department_id = d.department_id
+       LEFT JOIN Department d ON s.department_id = d.department_id
        LEFT JOIN Library_Members lm ON lm.student_id = s.student_id
        ${where}
-       ORDER BY s.name
+       ORDER BY s.name ASC
        LIMIT ? OFFSET ?`,
-      [...params, Number(limit), Number(offset)]
+      [...params, parsedLimit, offset]
     );
 
-    const [[{ total }]] = await pool.query(
+    // 4. Count Query with Matching Alias
+    // CRITICAL: We MUST include 's' alias here because 'where' uses 's.name'
+    const [countResult] = await pool.query(
       `SELECT COUNT(*) AS total FROM Students s ${where}`,
       params
     );
+    
+    const total = countResult[0]?.total || 0;
 
     res.json({
       success: true,
       data: rows,
-      meta: { total, page: Number(page), limit: Number(limit), pages: Math.ceil(total / limit) },
+      meta: { 
+        total, 
+        page: parsedPage, 
+        limit: parsedLimit, 
+        pages: Math.ceil(total / parsedLimit) || 1
+      },
     });
   } catch (err) {
+    // Check your TERMINAL/CONSOLE where the node process is running
+    // It will print the exact MySQL error (e.g., "Unknown column 'cgpa'")
+    console.error("Critical SQL Error:", err.message);
     next(err);
   }
 };
@@ -181,7 +204,7 @@ export const getStudent = async (req, res, next) => {
     const [[student]] = await pool.query(
       `SELECT s.student_id, s.name, s.registration_no, s.email, s.phone,
               s.academic_year, s.cgpa, s.gender, s.date_of_birth,
-              s.enrollment_date, s.address, s.profile_bio, s.is_registered,
+              s.created_at, s.address, s.profile_bio, s.is_registered,
               d.department_id, d.department_name,
               lm.member_id, lm.status AS membership_status, lm.membership_date
        FROM Students s

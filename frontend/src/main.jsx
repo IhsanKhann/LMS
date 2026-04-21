@@ -21,14 +21,19 @@ const BookForm            = React.lazy(() => import("./pages/books/BookForm.jsx"
 // const MembersPage         = React.lazy(() => import("./pages/members/MembersPage.jsx"));
 const StudentsPage        = React.lazy(() => import("./pages/members/StudentPage.jsx"));
 const StudentProfile      = React.lazy(() => import("./pages/members/StudentProfile.jsx"));
+
 const FacultyPage         = React.lazy(() => import("./pages/members/FacultyPage.jsx"));
 const FacultyProfile      = React.lazy(() => import("./pages/members/FacultyProfile.jsx"));
+
+// members page seperate:
+const MembersPage         = React.lazy(() => import("./pages/members/MembersPage.jsx"));
+
 const TransactionsPage    = React.lazy(() => import("./pages/transactions/TransactionsPage.jsx"));
 const OverduePage         = React.lazy(() => import("./pages/transactions/OverduePage.jsx"));
 const UnauthorizedPage    = React.lazy(() => import("./pages/auth/UnauthorizedPage.jsx"));
 // Public registration pages (no auth required)
-const StudentRegistration = React.lazy(() => import("./pages/registration/StudentRegistration.jsx"));
-const FacultyRegistration = React.lazy(() => import("./pages/registration/FacultyRegistration.jsx"));
+const StudentRegistration = React.lazy(() => import("./pages/members/registration/StudentRegistration.jsx"));
+const FacultyRegistration = React.lazy(() => import("./pages/members/registration/FacultyRegistration.jsx"));
 
 const router = createBrowserRouter([
   // ── Public routes (no auth) ─────────────────────────────────────────────
@@ -67,6 +72,8 @@ const router = createBrowserRouter([
           // Faculty management
           { path: "/faculty",             element: <FacultyPage /> },
           { path: "/faculty/:id",         element: <FacultyProfile /> },
+          //members:
+          { path: "/members/", element: <MembersPage /> },
           // Transactions
           { path: "/transactions",        element: <TransactionsPage /> },
           // Book management

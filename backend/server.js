@@ -1,9 +1,12 @@
-// server.js
-import express      from "express";
-import cors         from "cors";
+import dotenv from "dotenv";
+dotenv.config(); // Call this FIRST
+
+import express from "express";
+import cors from "cors";
 import cookieParser from "cookie-parser";
-import dotenv       from "dotenv";
-import "./config/db.js"; // establish pool on startup
+
+// Now DB_HOST and others are populated in process.env
+import "./config/db.js";
 
 // Routes
 import authRoutes        from "./routes/auth.routes.js";
@@ -14,8 +17,6 @@ import departmentRoutes  from "./routes/department.routes.js";
 
 import studentRoutes from "./routes/student.routes.js";
 import facultyRoutes from "./routes/faculty.routes.js";
-
-dotenv.config();
 
 const app  = express();
 const PORT = process.env.PORT || 5000;

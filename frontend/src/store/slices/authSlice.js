@@ -1,88 +1,148 @@
 // src/store/slices/authSlice.js
+// ─────────────────────────────────────────────────────────────────────────────
+//  Redux slice for authentication state.
+//  Referenced by: LoginPage.jsx, useAuth.js, ProtectedRoute.jsx
+//
+//  State shape:
+//    librarian     — null | { id, name, role, username?, email? }
+//    isAuthenticated — boolean
+//    loading       — boolean
+//    error         — null | string
+// ─────────────────────────────────────────────────────────────────────────────
 import { createSlice, createAsyncThunk } from "@reduxjs/toolkit";
 import api from "../../api/axios.js";
 
-// ── Thunks ──────────────────────────────────────────────────────────────────
-
+// ── loginThunk ────────────────────────────────────────────────────────────────
+// Payload: { username, password }  (username can be email, reg_no, emp_no, etc.)
 export const loginThunk = createAsyncThunk(
   "auth/login",
   async (credentials, { rejectWithValue }) => {
     try {
       const { data } = await api.post("/auth/login", credentials);
-      // Persist token so the axios interceptor picks it up on subsequent requests
-      if (data.token) {
-        localStorage.setItem("accessToken", data.token);
-      }
-      // Backend may return the user under different keys — handle all variants
-      return data.librarian ?? data.user ?? data.data ?? null;
+      // data = { success: true, data: { accessToken, user: { id, name, role, ... } } }
+      return data.data; // { accessToken, user }
     } catch (err) {
-      return rejectWithValue(
-        err.response?.data?.message || "Invalid credentials. Please try again."
-      );
+      const message =
+        err.response?.data?.message || "Login failed. Please try again.";
+      return rejectWithValue(message);
     }
   }
 );
 
-export const logoutThunk = createAsyncThunk("auth/logout", async () => {
-  localStorage.removeItem("accessToken");
-  try {
-    // Best-effort: tell the server to invalidate the refresh token cookie
-    await api.post("/auth/logout");
-  } catch (_) {
-    // Ignore — local session is cleared regardless
+// ── logoutThunk ───────────────────────────────────────────────────────────────
+export const logoutThunk = createAsyncThunk(
+  "auth/logout",
+  async (_, { rejectWithValue }) => {
+    try {
+      await api.post("/auth/logout");
+    } catch {
+      // Even if the server call fails, clear the local session
+    }
+    localStorage.removeItem("accessToken");
   }
-});
+);
 
-// ── Slice ───────────────────────────────────────────────────────────────────
+// ── Restore session from localStorage on cold load ───────────────────────────
+// If there's a token in localStorage, decode it to restore the user without
+// a network request. The axios interceptor will refresh if the token is expired.
+const restoreSession = () => {
+  try {
+    const token = localStorage.getItem("accessToken");
+    if (!token) return { librarian: null, isAuthenticated: false };
 
+    // Decode the JWT payload (no signature verification — the server verifies)
+    const payload = JSON.parse(atob(token.split(".")[1]));
+
+    // Reject if clearly expired (add 10-second buffer)
+    if (payload.exp * 1000 < Date.now() - 10_000) {
+      localStorage.removeItem("accessToken");
+      return { librarian: null, isAuthenticated: false };
+    }
+
+    return {
+      librarian: {
+        id:   payload.id,
+        role: payload.role,
+        // name is not in the JWT — it will be populated after getMe or on next login
+        name: null,
+      },
+      isAuthenticated: true,
+    };
+  } catch {
+    localStorage.removeItem("accessToken");
+    return { librarian: null, isAuthenticated: false };
+  }
+};
+
+const initialSession = restoreSession();
+
+// ── Slice ─────────────────────────────────────────────────────────────────────
 const authSlice = createSlice({
   name: "auth",
   initialState: {
-    // Set a hardcoded librarian here during development so every page is
-    // accessible without a running backend. Set to null in production.
-    librarian: {
-      librarian_id: 1,
-      name:         "Test Librarian",
-      username:     "test",
-      role:         "admin", // try "staff" | "student" | "faculty"
-    },
-    isAuthenticated: true, // mirrors !!librarian
+    librarian:       initialSession.librarian,
+    isAuthenticated: initialSession.isAuthenticated,
     loading:         false,
     error:           null,
   },
+
   reducers: {
-    setLibrarian: (state, action) => {
-      state.librarian      = action.payload;
-      state.isAuthenticated = !!action.payload;
+    // Called by the axios interceptor's auth:logout event
+    clearAuth(state) {
+      state.librarian       = null;
+      state.isAuthenticated = false;
+      state.error           = null;
     },
-    clearError: (state) => {
-      state.error = null;
+
+    // Allows updating profile fields after a successful GET /me call
+    setLibrarian(state, action) {
+      state.librarian       = { ...state.librarian, ...action.payload };
+      state.isAuthenticated = true;
     },
   },
+
   extraReducers: (builder) => {
-    // ── login ──────────────────────────────────────────────────────────────
+    // ── login ───────────────────────────────────────────────────────────────
     builder
       .addCase(loginThunk.pending, (state) => {
         state.loading = true;
         state.error   = null;
       })
       .addCase(loginThunk.fulfilled, (state, action) => {
-        state.loading        = false;
-        state.librarian      = action.payload;
-        state.isAuthenticated = !!action.payload;
+        const { accessToken, user } = action.payload;
+
+        // Persist token for the axios interceptor
+        localStorage.setItem("accessToken", accessToken);
+
+        state.librarian       = user;   // { id, name, role, username?, email? }
+        state.isAuthenticated = true;
+        state.loading         = false;
+        state.error           = null;
       })
       .addCase(loginThunk.rejected, (state, action) => {
         state.loading = false;
-        state.error   = action.payload;
+        state.error   = action.payload ?? "Login failed";
       });
 
-    // ── logout ─────────────────────────────────────────────────────────────
-    builder.addCase(logoutThunk.fulfilled, (state) => {
-      state.librarian       = null;
-      state.isAuthenticated = false;
-    });
+    // ── logout ──────────────────────────────────────────────────────────────
+    builder
+      .addCase(logoutThunk.pending, (state) => {
+        state.loading = true;
+      })
+      .addCase(logoutThunk.fulfilled, (state) => {
+        state.librarian       = null;
+        state.isAuthenticated = false;
+        state.loading         = false;
+        state.error           = null;
+      })
+      .addCase(logoutThunk.rejected, (state) => {
+        // Even on rejection, clear local state
+        state.librarian       = null;
+        state.isAuthenticated = false;
+        state.loading         = false;
+      });
   },
 });
 
-export const { setLibrarian, clearError } = authSlice.actions;
+export const { clearAuth, setLibrarian } = authSlice.actions;
 export default authSlice.reducer;

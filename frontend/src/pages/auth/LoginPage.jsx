@@ -3,6 +3,7 @@ import { useState, useEffect }          from "react";
 import { useDispatch, useSelector }     from "react-redux";
 import { useNavigate, useLocation }     from "react-router-dom";
 import { loginThunk }                   from "../../store/slices/authSlice.js";
+import { clearAuth }                    from "../../store/slices/authSlice.js";
 
 // ── Floating label input ─────────────────────────────────────────────────────
 function FloatingInput({ id, label, type = "text", value, onChange, autoComplete }) {
@@ -173,12 +174,22 @@ export default function LoginPage() {
   const [form,  setForm]  = useState({ username: "", password: "" });
   const [shake, setShake] = useState(false);
 
-  // Redirect if already logged in
+  // ── Listen for token-refresh failure (fired by axios interceptor) ─────────
+  useEffect(() => {
+    const handleForceLogout = () => {
+      dispatch(clearAuth());
+      navigate("/login", { replace: true });
+    };
+    window.addEventListener("auth:logout", handleForceLogout);
+    return () => window.removeEventListener("auth:logout", handleForceLogout);
+  }, [dispatch, navigate]);
+
+  // ── Redirect if already logged in ─────────────────────────────────────────
   useEffect(() => {
     if (isAuthenticated) navigate(from, { replace: true });
   }, [isAuthenticated, navigate, from]);
 
-  // Shake animation on error
+  // ── Shake animation on error ──────────────────────────────────────────────
   useEffect(() => {
     if (error) {
       setShake(true);
@@ -191,6 +202,7 @@ export default function LoginPage() {
     if (e) e.preventDefault();
     if (loading) return;
 
+    // The backend accepts username OR email in the `username` field
     const credentials = {
       username: form.username.trim(),
       password: form.password,
@@ -260,7 +272,7 @@ export default function LoginPage() {
                 Welcome back
               </h1>
               <p className="text-slate-500 text-sm mt-2">
-                Sign in to access the library management dashboard.
+                Sign in with your username, email, or student/employee ID.
               </p>
             </div>
 
@@ -282,7 +294,7 @@ export default function LoginPage() {
             <form onSubmit={handleSubmit} className="space-y-3">
               <div className="fu-2">
                 <FloatingInput
-                  id="username" label="Username"
+                  id="username" label="Username / Email / Student ID"
                   value={form.username} autoComplete="username"
                   onChange={(e) => setForm({ ...form, username: e.target.value })}
                 />
@@ -353,31 +365,36 @@ export default function LoginPage() {
                 </button>
               </div>
 
-              {/* Divider + SSO */}
-              <div className="fu-6 pt-2">
-                <div className="flex items-center gap-3">
-                  <div className="flex-1 h-px bg-slate-800"/>
-                  <span className="text-xs text-slate-700">or continue with</span>
-                  <div className="flex-1 h-px bg-slate-800"/>
+              {/* Dummy credentials hint (remove in production) */}
+              <div className="fu-6 pt-1">
+                <div className="rounded-xl border border-slate-800 bg-slate-900/50 p-4 space-y-1.5">
+                  <p className="text-[10px] font-semibold tracking-widest uppercase text-slate-600 mb-2">
+                    Demo accounts
+                  </p>
+                  {[
+                    ["Admin",   "admin",       "admin123"],
+                    ["Staff",   "staff1",      "admin123"],
+                    ["Student", "CS-2021-001", "student123"],
+                    ["Faculty", "FAC-001",     "faculty123"],
+                  ].map(([role, user, pass]) => (
+                    <button
+                      key={role}
+                      type="button"
+                      onClick={() => setForm({ username: user, password: pass })}
+                      className="w-full flex items-center justify-between rounded-lg
+                                 px-3 py-1.5 text-xs text-slate-500 hover:text-slate-300
+                                 hover:bg-slate-800 transition-all"
+                    >
+                      <span className="font-medium text-slate-400">{role}</span>
+                      <span className="font-mono">{user} / {pass}</span>
+                    </button>
+                  ))}
                 </div>
-                <button
-                  type="button"
-                  className="mt-3 w-full flex items-center justify-center gap-3 rounded-xl
-                             py-3 text-sm text-slate-400 font-medium border border-slate-800
-                             hover:border-slate-700 hover:text-slate-300 transition-all duration-150"
-                >
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
-                       stroke="currentColor" strokeWidth="1.8">
-                    <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
-                    <polyline points="9 22 9 12 15 12 15 22"/>
-                  </svg>
-                  University SSO
-                </button>
               </div>
             </form>
 
             {/* Footer note */}
-            <p className="mt-10 text-center text-xs text-slate-700 fu-6">
+            <p className="mt-8 text-center text-xs text-slate-700 fu-6">
               Restricted to authorized library staff only.
             </p>
           </div>

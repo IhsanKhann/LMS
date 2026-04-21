@@ -30,16 +30,12 @@ export default function Dashboard() {
         let facultyCount = 0;
 
         if (isStaff) {
-          const [memRes, stuRes, facRes] = await Promise.all([
+          const [memRes, stuRes, facRes] = await Promise.allSettled([
             api.get("/members"),
             api.get("/students", { params: { limit: 1 } }),
             api.get("/faculty",  { params: { limit: 1 } }),
           ]);
 
-          // ⚠️  FIX: GET /members returns { success, data: [...] } — a plain array,
-          //     not paginated. Count the array length directly.
-          //     The original code used memRes.data?.data?.length which was correct,
-          //     but the limit:1 was missing — causing a full table scan every load.
           memberCount  = memRes.data?.data?.length  || 0;
 
           // students and faculty use paginated responses — use meta.total
@@ -65,9 +61,6 @@ export default function Dashboard() {
     };
 
     fetchStats();
-  // ⚠️  FIX: Original dep array was [librarian] — this caused the effect to
-  //     re-run on every render if librarian is an unstable reference.
-  //     Depend on the stable scalar values instead.
   }, [isAdmin, isStaff]);
 
   const allActions = [
