@@ -4,11 +4,11 @@ WORKDIR /app
 
 # Install dependencies first (layer caching)
 COPY package*.json ./
-RUN npm install
+RUN npm install --omit=dev
 
 # Copy source
 COPY . .
 
-EXPOSE 3000
+EXPOSE 5000
 
 CMD ["node", "server.js"]

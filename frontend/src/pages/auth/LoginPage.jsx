@@ -1,8 +1,8 @@
 // src/pages/auth/LoginPage.jsx
-import { useState, useEffect } from "react";
-import { useDispatch, useSelector } from "react-redux";
-import { useNavigate, useLocation } from "react-router-dom";
-// import { loginThunk } from "../../store/slices/authSlice.js";
+import { useState, useEffect }          from "react";
+import { useDispatch, useSelector }     from "react-redux";
+import { useNavigate, useLocation }     from "react-router-dom";
+import { loginThunk }                   from "../../store/slices/authSlice.js";
 
 // ── Floating label input ─────────────────────────────────────────────────────
 function FloatingInput({ id, label, type = "text", value, onChange, autoComplete }) {
@@ -41,7 +41,7 @@ function FloatingInput({ id, label, type = "text", value, onChange, autoComplete
           autoComplete={autoComplete}
           required
           onFocus={() => setFocused(true)}
-          onBlur={() => setFocused(false)}
+          onBlur={()  => setFocused(false)}
           onChange={onChange}
           className={`w-full bg-transparent rounded-xl px-4 pb-3 text-sm text-white
                       focus:outline-none caret-indigo-400 ${lifted ? "pt-6" : "pt-4"}`}
@@ -87,7 +87,7 @@ function BrandPanel() {
       {/* Grid lines */}
       <div className="absolute inset-0 opacity-[0.035]" style={{
         backgroundImage: "linear-gradient(#fff 1px,transparent 1px),linear-gradient(90deg,#fff 1px,transparent 1px)",
-        backgroundSize: "48px 48px",
+        backgroundSize:  "48px 48px",
       }}/>
 
       {/* Glow orbs */}
@@ -166,21 +166,19 @@ export default function LoginPage() {
   const dispatch = useDispatch();
   const navigate = useNavigate();
   const location = useLocation();
-  
-  // 1. Pulling 'isAuthenticated' to prevent loops
+
   const { loading, error, isAuthenticated } = useSelector((s) => s.auth);
   const from = location.state?.from?.pathname || "/dashboard";
 
-  const [form, setForm] = useState({ username: "", password: "" });
+  const [form,  setForm]  = useState({ username: "", password: "" });
   const [shake, setShake] = useState(false);
 
-  // 2. Redirect if already logged in (prevents landing on login while active)
+  // Redirect if already logged in
   useEffect(() => {
-    if (isAuthenticated) {
-      navigate(from, { replace: true });
-    }
+    if (isAuthenticated) navigate(from, { replace: true });
   }, [isAuthenticated, navigate, from]);
 
+  // Shake animation on error
   useEffect(() => {
     if (error) {
       setShake(true);
@@ -189,32 +187,18 @@ export default function LoginPage() {
     }
   }, [error]);
 
-  // 3. Refactored Submission Logic
   const handleSubmit = async (e) => {
-    // Stop the browser from refreshing the page immediately
     if (e) e.preventDefault();
-
-    // Prevent double-taps if already loading
     if (loading) return;
 
-    // Sanitize input: Trim whitespace to match the backend/DB trim logic
     const credentials = {
       username: form.username.trim(),
-      password: form.password // Don't trim passwords (spaces can be intentional)
+      password: form.password,
     };
 
-    try {
-      // .unwrap() is cleaner for handling successful navigation in Thunks
-      const resultAction = await dispatch(loginThunk(credentials));
-      
-      if (loginThunk.fulfilled.match(resultAction)) {
-        // Success: The useEffect above will handle the redirect, 
-        // but explicit navigation here is safer.
-        navigate(from, { replace: true });
-      }
-    } catch (err) {
-      // Errors are handled by the Redux 'error' state, which triggers the shake effect
-      console.error("Login sequence encountered an error:", err);
+    const resultAction = await dispatch(loginThunk(credentials));
+    if (loginThunk.fulfilled.match(resultAction)) {
+      navigate(from, { replace: true });
     }
   };
 
@@ -248,7 +232,7 @@ export default function LoginPage() {
 
       <div className="min-h-screen bg-[#080d18] flex font-body">
 
-        {/* Brand panel — left half */}
+        {/* Brand panel — left half (lg+) */}
         <BrandPanel />
 
         {/* Form panel — right half */}
@@ -280,7 +264,7 @@ export default function LoginPage() {
               </p>
             </div>
 
-            {/* Error */}
+            {/* Error banner */}
             {error && (
               <div className="mb-6 flex items-start gap-3 px-4 py-3.5 rounded-xl
                               bg-red-500/8 border border-red-500/20 fu-1">
@@ -294,7 +278,7 @@ export default function LoginPage() {
               </div>
             )}
 
-            {/* Fields */}
+            {/* Form */}
             <form onSubmit={handleSubmit} className="space-y-3">
               <div className="fu-2">
                 <FloatingInput
@@ -369,7 +353,7 @@ export default function LoginPage() {
                 </button>
               </div>
 
-              {/* Divider + SSO hint */}
+              {/* Divider + SSO */}
               <div className="fu-6 pt-2">
                 <div className="flex items-center gap-3">
                   <div className="flex-1 h-px bg-slate-800"/>
@@ -382,7 +366,6 @@ export default function LoginPage() {
                              py-3 text-sm text-slate-400 font-medium border border-slate-800
                              hover:border-slate-700 hover:text-slate-300 transition-all duration-150"
                 >
-                  {/* University icon */}
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
                        stroke="currentColor" strokeWidth="1.8">
                     <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
@@ -393,7 +376,7 @@ export default function LoginPage() {
               </div>
             </form>
 
-            {/* Footer */}
+            {/* Footer note */}
             <p className="mt-10 text-center text-xs text-slate-700 fu-6">
               Restricted to authorized library staff only.
             </p>

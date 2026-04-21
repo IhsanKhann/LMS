@@ -1,24 +1,36 @@
 /** @type {import('tailwindcss').Config} */
 export default {
-  content: ["./index.html", "./src/**/*.{js,jsx}"],
-  darkMode: "class",
+  content: ["./index.html", "./src/**/*.{js,jsx,ts,tsx}"],
   theme: {
     extend: {
+      // ── Brand colours ──────────────────────────────────────────────────────
       colors: {
-        primary:  { DEFAULT: "#4F46E5", hover: "#4338CA", light: "#EEF2FF" },
-        success:  { DEFAULT: "#10B981", light: "#D1FAE5" },
-        warning:  { DEFAULT: "#F59E0B", light: "#FEF3C7" },
-        danger:   { DEFAULT: "#EF4444", light: "#FEE2E2" },
-        surface:  { DEFAULT: "#F8FAFC", dark: "#0F172A" },
+        primary:       "#4F46E5", // indigo-600
+        "primary-hover": "#4338CA",
+
+        surface:       "#F8FAFC", // slate-50 — page background
+
+        "success-light": "#ECFDF5", // emerald-50
+        "warning-light": "#FFFBEB", // amber-50
+        "danger-light":  "#FEF2F2", // red-50
       },
+
+      // ── Typography ─────────────────────────────────────────────────────────
       fontFamily: {
-        display: ["'Playfair Display'", "serif"],
-        body:    ["'DM Sans'", "sans-serif"],
-        mono:    ["'JetBrains Mono'", "monospace"],
+        display: ["Playfair Display", "Georgia", "serif"],
+        body:    ["DM Sans",          "system-ui", "sans-serif"],
+        mono:    ["JetBrains Mono",   "Menlo",     "monospace"],
       },
+
+      // ── Shadows ────────────────────────────────────────────────────────────
       boxShadow: {
-        card:  "0 1px 3px rgba(0,0,0,.06), 0 4px 16px rgba(0,0,0,.04)",
-        hover: "0 4px 24px rgba(79,70,229,.12)",
+        card: "0 1px 3px 0 rgb(0 0 0 / .06), 0 1px 2px -1px rgb(0 0 0 / .04)",
+      },
+
+      // ── Border-radius ──────────────────────────────────────────────────────
+      borderRadius: {
+        "2xl": "1rem",
+        "3xl": "1.5rem",
       },
     },
   },

@@ -1,19 +1,26 @@
 // controllers/issue.controller.js
+// ─────────────────────────────────────────────────────────────────────────────
+//  PRD §6 — Book Issue & Return
+//
+//  Bug fixes vs original:
+//  - issueBook used req.user?.id  but checkAuth attaches req.librarian.
+//    Fixed to req.librarian?.librarian_id.
+//  - Routes are now /api/issues (PRD §7.4) not /api/transactions.
+//  - Added GET /api/issues/:id  (PRD §7.4)
+//  - Added GET /api/issues/book/:bookId (PRD §7.4)
+// ─────────────────────────────────────────────────────────────────────────────
 import pool from "../config/db.js";
 
-// ── issueBook ─────────────────────────────────────────────────────────────────
-// POST /api/transactions/issue
+// ── POST /api/issues ───────────────────────────────────────────────────────────
+// PRD §6.1 — Issue a book (atomic: insert txn + mark copy issued)
 export const issueBook = async (req, res, next) => {
   const conn = await pool.getConnection();
   try {
     await conn.beginTransaction();
 
     const { copy_id, member_id } = req.body;
-
-    // ⚠️  FIX: The original code read req.librarian.librarian_id, but
-    //     checkAuth attaches the decoded JWT payload to req.user (id, role).
-    //     Using req.librarian would throw "Cannot read properties of undefined".
-    const librarian_id = req.user?.id;
+    // BUG FIX: was req.user?.id — checkAuth attaches req.librarian
+    const librarian_id = req.librarian?.librarian_id;
 
     if (!copy_id || !member_id) {
       await conn.rollback();
@@ -31,7 +38,8 @@ export const issueBook = async (req, res, next) => {
     }
     if (copy.status !== "available") {
       await conn.rollback();
-      return res.status(409).json({ success: false, message: "Book copy is not available" });
+      // PRD §6.5 — 422 for unavailable book
+      return res.status(422).json({ success: false, message: "Book copy is not available" });
     }
 
     // 2. Fetch member + borrowing policy
@@ -54,9 +62,7 @@ export const issueBook = async (req, res, next) => {
 
     // 3. Borrowing limit check
     const [[{ current_count }]] = await conn.query(
-      `SELECT COUNT(*) AS current_count
-       FROM Issue_Transactions
-       WHERE member_id = ? AND return_date IS NULL`,
+      "SELECT COUNT(*) AS current_count FROM Issue_Transactions WHERE member_id = ? AND return_date IS NULL",
       [member_id]
     );
     if (current_count >= member.max_books_allowed) {
@@ -67,13 +73,29 @@ export const issueBook = async (req, res, next) => {
       });
     }
 
-    // 4. Calculate due date
+    // 4. PRD §6.1 — optional: member cannot have the same book issued twice
+    const [[{ dup }]] = await conn.query(
+      `SELECT COUNT(*) AS dup
+       FROM Issue_Transactions it
+       JOIN Book_Copies bc ON it.copy_id = bc.copy_id
+       WHERE it.member_id = ? AND bc.book_id = ? AND it.return_date IS NULL`,
+      [member_id, copy.book_id]
+    );
+    if (dup > 0) {
+      await conn.rollback();
+      return res.status(409).json({
+        success: false,
+        message: "Member already has a copy of this book issued",
+      });
+    }
+
+    // 5. Calculate due date
     const issueDate = new Date();
     const dueDate   = member.loan_duration_days
-      ? new Date(issueDate.getTime() + member.loan_duration_days * 86400000)
+      ? new Date(issueDate.getTime() + member.loan_duration_days * 86_400_000)
       : new Date("9999-12-31");
 
-    // 5. Insert transaction
+    // 6. Insert transaction
     const [result] = await conn.query(
       `INSERT INTO Issue_Transactions
          (copy_id, member_id, librarian_id, issue_date, due_date, fine_amount)
@@ -81,10 +103,9 @@ export const issueBook = async (req, res, next) => {
       [copy_id, member_id, librarian_id, dueDate.toISOString().split("T")[0]]
     );
 
-    // 6. Mark copy as issued
+    // 7. Mark copy as issued
     await conn.query(
-      "UPDATE Book_Copies SET status = 'issued' WHERE copy_id = ?",
-      [copy_id]
+      "UPDATE Book_Copies SET status = 'issued' WHERE copy_id = ?", [copy_id]
     );
 
     await conn.commit();
@@ -110,14 +131,14 @@ export const issueBook = async (req, res, next) => {
   }
 };
 
-// ── returnBook ────────────────────────────────────────────────────────────────
-// PATCH /api/transactions/:issueId/return
+// ── PUT /api/issues/:id/return ────────────────────────────────────────────────
+// PRD §6.2 — Return a book (atomic: update txn + mark copy available)
 export const returnBook = async (req, res, next) => {
   const conn = await pool.getConnection();
   try {
     await conn.beginTransaction();
 
-    const { issueId } = req.params;
+    const { id } = req.params;
 
     const [[txn]] = await conn.query(
       `SELECT it.issue_id, it.copy_id, it.member_id, it.due_date,
@@ -126,12 +147,12 @@ export const returnBook = async (req, res, next) => {
        JOIN Library_Members lm  ON it.member_id = lm.member_id
        JOIN Borrowing_Policy bp ON lm.member_type = bp.member_type
        WHERE it.issue_id = ?`,
-      [issueId]
+      [id]
     );
 
     if (!txn) {
       await conn.rollback();
-      return res.status(404).json({ success: false, message: "Transaction not found" });
+      return res.status(404).json({ success: false, message: "Issue record not found" });
     }
     if (txn.return_date) {
       await conn.rollback();
@@ -140,16 +161,13 @@ export const returnBook = async (req, res, next) => {
 
     const today    = new Date();
     const due      = new Date(txn.due_date);
-    const daysLate = Math.max(0, Math.floor((today - due) / 86400000));
+    const daysLate = Math.max(0, Math.floor((today - due) / 86_400_000));
     const fineAmt  = (daysLate * parseFloat(txn.fine_per_day)).toFixed(2);
 
     await conn.query(
-      `UPDATE Issue_Transactions
-       SET return_date = CURRENT_DATE, fine_amount = ?
-       WHERE issue_id = ?`,
-      [fineAmt, issueId]
+      "UPDATE Issue_Transactions SET return_date = CURRENT_DATE, fine_amount = ? WHERE issue_id = ?",
+      [fineAmt, id]
     );
-
     await conn.query(
       "UPDATE Book_Copies SET status = 'available' WHERE copy_id = ?",
       [txn.copy_id]
@@ -175,34 +193,160 @@ export const returnBook = async (req, res, next) => {
   }
 };
 
-// ── getOverdue ────────────────────────────────────────────────────────────────
-// GET /api/transactions/overdue
+// ── GET /api/issues ────────────────────────────────────────────────────────────
+// PRD §7.4 — all issue records, filterable by status and member
+export const getIssues = async (req, res, next) => {
+  try {
+    const { status, member_id, page = 1, limit = 20 } = req.query;
+    const offset = (page - 1) * limit;
+    const params = [];
+    let where = "WHERE 1=1";
+
+    if (member_id) {
+      where += " AND it.member_id = ?";
+      params.push(member_id);
+    }
+    if (status === "active") {
+      where += " AND it.return_date IS NULL AND it.due_date >= CURRENT_DATE";
+    } else if (status === "overdue") {
+      where += " AND it.return_date IS NULL AND it.due_date < CURRENT_DATE";
+    } else if (status === "returned") {
+      where += " AND it.return_date IS NOT NULL";
+    }
+
+    const [rows] = await pool.query(
+      `SELECT it.issue_id,
+              COALESCE(s.name, f.name) AS member_name,
+              lm.member_type,
+              b.title, b.isbn, bc.barcode,
+              it.issue_date, it.due_date, it.return_date, it.fine_amount,
+              CASE WHEN it.return_date IS NOT NULL THEN 'returned'
+                   WHEN it.due_date < CURRENT_DATE  THEN 'overdue'
+                   ELSE 'active' END AS status
+       FROM Issue_Transactions it
+       JOIN Library_Members lm ON it.member_id = lm.member_id
+       LEFT JOIN Students s    ON lm.student_id = s.student_id
+       LEFT JOIN Faculty  f    ON lm.faculty_id = f.faculty_id
+       JOIN Book_Copies bc     ON it.copy_id    = bc.copy_id
+       JOIN Books b            ON bc.book_id    = b.book_id
+       ${where}
+       ORDER BY it.issue_date DESC
+       LIMIT ? OFFSET ?`,
+      [...params, Number(limit), Number(offset)]
+    );
+
+    const [[{ total }]] = await pool.query(
+      `SELECT COUNT(*) AS total
+       FROM Issue_Transactions it ${where}`,
+      params
+    );
+
+    res.json({
+      success: true,
+      data: rows,
+      meta: { total, page: Number(page), limit: Number(limit), pages: Math.ceil(total / limit) },
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+// ── GET /api/issues/:id ────────────────────────────────────────────────────────
+// PRD §7.4 — single issue record
+export const getIssue = async (req, res, next) => {
+  try {
+    const [[row]] = await pool.query(
+      `SELECT it.*,
+              COALESCE(s.name, f.name) AS member_name,
+              lm.member_type,
+              b.title, b.isbn, bc.barcode, bc.shelf_location,
+              CASE WHEN it.return_date IS NOT NULL THEN 'returned'
+                   WHEN it.due_date < CURRENT_DATE  THEN 'overdue'
+                   ELSE 'active' END AS status
+       FROM Issue_Transactions it
+       JOIN Library_Members lm ON it.member_id = lm.member_id
+       LEFT JOIN Students s    ON lm.student_id = s.student_id
+       LEFT JOIN Faculty  f    ON lm.faculty_id = f.faculty_id
+       JOIN Book_Copies bc     ON it.copy_id    = bc.copy_id
+       JOIN Books b            ON bc.book_id    = b.book_id
+       WHERE it.issue_id = ?`,
+      [req.params.id]
+    );
+    if (!row) return res.status(404).json({ success: false, message: "Issue record not found" });
+    res.json({ success: true, data: row });
+  } catch (err) {
+    next(err);
+  }
+};
+
+// ── GET /api/issues/overdue ────────────────────────────────────────────────────
 export const getOverdue = async (_req, res, next) => {
   try {
-    const [rows] = await pool.query("SELECT * FROM vw_overdue_transactions");
+    const [rows] = await pool.query(
+      `SELECT it.issue_id,
+              COALESCE(s.name, f.name) AS member_name,
+              lm.member_type,
+              b.title, bc.barcode,
+              it.issue_date, it.due_date,
+              DATEDIFF(CURRENT_DATE, it.due_date) AS days_overdue
+       FROM Issue_Transactions it
+       JOIN Library_Members lm ON it.member_id = lm.member_id
+       LEFT JOIN Students s    ON lm.student_id = s.student_id
+       LEFT JOIN Faculty  f    ON lm.faculty_id = f.faculty_id
+       JOIN Book_Copies bc     ON it.copy_id    = bc.copy_id
+       JOIN Books b            ON bc.book_id    = b.book_id
+       WHERE it.return_date IS NULL AND it.due_date < CURRENT_DATE
+       ORDER BY it.due_date ASC`
+    );
     res.json({ success: true, data: rows });
   } catch (err) {
     next(err);
   }
 };
 
-// ── getMemberTransactions ─────────────────────────────────────────────────────
-// GET /api/transactions/member/:memberId
-export const getMemberTransactions = async (req, res, next) => {
+// ── GET /api/issues/member/:memberId ──────────────────────────────────────────
+// PRD §7.4
+export const getMemberIssues = async (req, res, next) => {
   try {
     const [rows] = await pool.query(
       `SELECT it.issue_id, b.title, b.isbn, bc.barcode, bc.shelf_location,
               it.issue_date, it.due_date, it.return_date, it.fine_amount,
-              CASE WHEN it.return_date IS NULL AND it.due_date < CURRENT_DATE
-                   THEN 'overdue'
-                   WHEN it.return_date IS NULL THEN 'active'
-                   ELSE 'returned' END AS transaction_status
+              CASE WHEN it.return_date IS NOT NULL THEN 'returned'
+                   WHEN it.due_date < CURRENT_DATE  THEN 'overdue'
+                   ELSE 'active' END AS status
        FROM Issue_Transactions it
        JOIN Book_Copies bc ON it.copy_id = bc.copy_id
        JOIN Books b        ON bc.book_id = b.book_id
        WHERE it.member_id = ?
        ORDER BY it.issue_date DESC`,
       [req.params.memberId]
+    );
+    res.json({ success: true, data: rows });
+  } catch (err) {
+    next(err);
+  }
+};
+
+// ── GET /api/issues/book/:bookId ───────────────────────────────────────────────
+// PRD §7.4
+export const getBookIssues = async (req, res, next) => {
+  try {
+    const [rows] = await pool.query(
+      `SELECT it.issue_id,
+              COALESCE(s.name, f.name) AS member_name,
+              lm.member_type,
+              bc.barcode, it.issue_date, it.due_date, it.return_date, it.fine_amount,
+              CASE WHEN it.return_date IS NOT NULL THEN 'returned'
+                   WHEN it.due_date < CURRENT_DATE  THEN 'overdue'
+                   ELSE 'active' END AS status
+       FROM Issue_Transactions it
+       JOIN Library_Members lm ON it.member_id = lm.member_id
+       LEFT JOIN Students s    ON lm.student_id = s.student_id
+       LEFT JOIN Faculty  f    ON lm.faculty_id = f.faculty_id
+       JOIN Book_Copies bc     ON it.copy_id    = bc.copy_id
+       WHERE bc.book_id = ?
+       ORDER BY it.issue_date DESC`,
+      [req.params.bookId]
     );
     res.json({ success: true, data: rows });
   } catch (err) {

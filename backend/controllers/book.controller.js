@@ -2,6 +2,7 @@
 import pool from "../config/db.js";
 
 // ── GET /api/books ─────────────────────────────────────────────────────────────
+// PRD §4.1 — paginated, sortable, searchable catalogue
 export const getBooks = async (req, res, next) => {
   try {
     const { search, category_id, page = 1, limit = 20 } = req.query;
@@ -32,12 +33,12 @@ export const getBooks = async (req, res, next) => {
            FROM Book_Authors ba
            JOIN Authors a ON ba.author_id = a.author_id
            WHERE ba.book_id = b.book_id) AS authors,
-          COUNT(DISTINCT bc.copy_id) AS total_copies,
+          COUNT(DISTINCT bc.copy_id)                              AS total_copies,
           SUM(CASE WHEN bc.status = 'available' THEN 1 ELSE 0 END) AS available_copies
        FROM Books b
-       LEFT JOIN Publishers p    ON b.publisher_id  = p.publisher_id
-       LEFT JOIN Categories c    ON b.category_id   = c.category_id
-       LEFT JOIN Book_Copies bc  ON b.book_id       = bc.book_id
+       LEFT JOIN Publishers p   ON b.publisher_id = p.publisher_id
+       LEFT JOIN Categories c   ON b.category_id  = c.category_id
+       LEFT JOIN Book_Copies bc ON b.book_id       = bc.book_id
        ${where}
        GROUP BY b.book_id, p.publisher_name, c.category_id
        ORDER BY b.title
@@ -45,11 +46,9 @@ export const getBooks = async (req, res, next) => {
       [...params, Number(limit), Number(offset)]
     );
 
-    const [countResult] = await pool.query(
-      `SELECT COUNT(*) AS total FROM Books b ${where}`,
-      params
+    const [[{ total }]] = await pool.query(
+      `SELECT COUNT(*) AS total FROM Books b ${where}`, params
     );
-    const total = countResult[0]?.total || 0;
 
     res.json({
       success: true,
@@ -62,7 +61,45 @@ export const getBooks = async (req, res, next) => {
       },
     });
   } catch (err) {
-    console.error("SQL Error in getBooks:", err.message);
+    next(err);
+  }
+};
+
+// ── GET /api/books/search ──────────────────────────────────────────────────────
+// PRD §7.2 — search by title/author/category/isbn (case-insensitive)
+export const searchBooks = async (req, res, next) => {
+  try {
+    const { q } = req.query;
+    if (!q) return res.status(400).json({ success: false, message: "q query param is required" });
+
+    const [rows] = await pool.query(
+      `SELECT b.book_id, b.title, b.isbn, b.edition, b.publication_year,
+              p.publisher_name, c.category_name,
+              (SELECT GROUP_CONCAT(a.author_name SEPARATOR ', ')
+               FROM Book_Authors ba
+               JOIN Authors a ON ba.author_id = a.author_id
+               WHERE ba.book_id = b.book_id) AS authors,
+              SUM(CASE WHEN bc.status = 'available' THEN 1 ELSE 0 END) AS available_copies
+       FROM Books b
+       LEFT JOIN Publishers p   ON b.publisher_id = p.publisher_id
+       LEFT JOIN Categories c   ON b.category_id  = c.category_id
+       LEFT JOIN Book_Copies bc ON b.book_id       = bc.book_id
+       WHERE b.title LIKE ?
+          OR b.isbn  LIKE ?
+          OR c.category_name LIKE ?
+          OR EXISTS (
+            SELECT 1 FROM Book_Authors ba2
+            JOIN Authors a2 ON ba2.author_id = a2.author_id
+            WHERE ba2.book_id = b.book_id AND a2.author_name LIKE ?
+          )
+       GROUP BY b.book_id
+       ORDER BY b.title
+       LIMIT 50`,
+      [`%${q}%`, `%${q}%`, `%${q}%`, `%${q}%`]
+    );
+
+    res.json({ success: true, data: rows });
+  } catch (err) {
     next(err);
   }
 };
@@ -71,11 +108,8 @@ export const getBooks = async (req, res, next) => {
 export const getBook = async (req, res, next) => {
   try {
     const [[book]] = await pool.query(
-      `SELECT
-         b.*,
-         p.publisher_name,
-         c.category_name,
-         GROUP_CONCAT(a.author_name ORDER BY ba.author_order SEPARATOR ', ') AS authors
+      `SELECT b.*, p.publisher_name, c.category_name,
+              GROUP_CONCAT(a.author_name ORDER BY ba.author_order SEPARATOR ', ') AS authors
        FROM Books b
        LEFT JOIN Publishers p    ON b.publisher_id = p.publisher_id
        LEFT JOIN Categories c    ON b.category_id  = c.category_id
@@ -117,6 +151,15 @@ export const createBook = async (req, res, next) => {
       return res.status(400).json({ success: false, message: "title is required" });
     }
 
+    // PRD §4.3 — year validation
+    if (publication_year) {
+      const y = Number(publication_year);
+      if (y < 1000 || y > new Date().getFullYear()) {
+        await conn.rollback();
+        return res.status(400).json({ success: false, message: "publication_year must be between 1000 and the current year" });
+      }
+    }
+
     const [result] = await conn.query(
       `INSERT INTO Books (title, isbn, edition, publication_year, publisher_id, category_id)
        VALUES (?, ?, ?, ?, ?, ?)`,
@@ -128,8 +171,7 @@ export const createBook = async (req, res, next) => {
     if (author_ids.length) {
       const vals = author_ids.map((aid, i) => [book_id, aid, i + 1]);
       await conn.query(
-        "INSERT INTO Book_Authors (book_id, author_id, author_order) VALUES ?",
-        [vals]
+        "INSERT INTO Book_Authors (book_id, author_id, author_order) VALUES ?", [vals]
       );
     }
 
@@ -138,8 +180,7 @@ export const createBook = async (req, res, next) => {
         book_id, barcode, shelf_location || null,
       ]);
       await conn.query(
-        "INSERT INTO Book_Copies (book_id, barcode, shelf_location) VALUES ?",
-        [copyVals]
+        "INSERT INTO Book_Copies (book_id, barcode, shelf_location) VALUES ?", [copyVals]
       );
     }
 
@@ -147,6 +188,9 @@ export const createBook = async (req, res, next) => {
     res.status(201).json({ success: true, message: "Book created", data: { book_id } });
   } catch (err) {
     await conn.rollback();
+    if (err.code === "ER_DUP_ENTRY") {
+      return res.status(409).json({ success: false, message: "ISBN already exists" });
+    }
     next(err);
   } finally {
     conn.release();
@@ -161,13 +205,11 @@ export const updateBook = async (req, res, next) => {
 
     const {
       title, isbn, edition, publication_year,
-      publisher_id, category_id,
-      author_ids,
+      publisher_id, category_id, author_ids,
     } = req.body;
     const { id } = req.params;
 
-    const fields = [];
-    const vals   = [];
+    const fields = [], vals = [];
     if (title            !== undefined) { fields.push("title = ?");            vals.push(title); }
     if (isbn             !== undefined) { fields.push("isbn = ?");             vals.push(isbn); }
     if (edition          !== undefined) { fields.push("edition = ?");          vals.push(edition); }
@@ -177,8 +219,7 @@ export const updateBook = async (req, res, next) => {
 
     if (fields.length) {
       await conn.query(
-        `UPDATE Books SET ${fields.join(", ")} WHERE book_id = ?`,
-        [...vals, id]
+        `UPDATE Books SET ${fields.join(", ")} WHERE book_id = ?`, [...vals, id]
       );
     }
 
@@ -187,8 +228,7 @@ export const updateBook = async (req, res, next) => {
       if (author_ids.length) {
         const authorVals = author_ids.map((aid, i) => [id, aid, i + 1]);
         await conn.query(
-          "INSERT INTO Book_Authors (book_id, author_id, author_order) VALUES ?",
-          [authorVals]
+          "INSERT INTO Book_Authors (book_id, author_id, author_order) VALUES ?", [authorVals]
         );
       }
     }
@@ -204,6 +244,7 @@ export const updateBook = async (req, res, next) => {
 };
 
 // ── DELETE /api/books/:id ──────────────────────────────────────────────────────
+// PRD §4.1 — blocked if there are active issue records
 export const deleteBook = async (req, res, next) => {
   try {
     const [[{ active }]] = await pool.query(
@@ -222,8 +263,7 @@ export const deleteBook = async (req, res, next) => {
     }
 
     const [result] = await pool.query(
-      "DELETE FROM Books WHERE book_id = ?",
-      [req.params.id]
+      "DELETE FROM Books WHERE book_id = ?", [req.params.id]
     );
 
     if (result.affectedRows === 0) {
@@ -249,8 +289,7 @@ export const addCopies = async (req, res, next) => {
     ]);
 
     await pool.query(
-      "INSERT INTO Book_Copies (book_id, barcode, shelf_location) VALUES ?",
-      [vals]
+      "INSERT INTO Book_Copies (book_id, barcode, shelf_location) VALUES ?", [vals]
     );
 
     res.status(201).json({ success: true, message: `${copies.length} copy/copies added` });
@@ -260,8 +299,6 @@ export const addCopies = async (req, res, next) => {
 };
 
 // ── GET /api/books/categories ──────────────────────────────────────────────────
-// ⚠️  FIX: This is also registered at GET /api/categories (see book.routes.js note).
-//     The route /categories in book.routes.js must be declared BEFORE /:id.
 export const getCategories = async (_req, res, next) => {
   try {
     const [rows] = await pool.query("SELECT * FROM Categories ORDER BY category_name");
@@ -271,22 +308,24 @@ export const getCategories = async (_req, res, next) => {
   }
 };
 
-// ── GET /api/publishers ────────────────────────────────────────────────────────
-// ⚠️  FIX: BookForm.jsx calls GET /api/publishers and GET /api/authors but
-//     no routes existed for them. Added here and wired in book.routes.js.
+// ── GET /api/books/publishers ──────────────────────────────────────────────────
 export const getPublishers = async (_req, res, next) => {
   try {
-    const [rows] = await pool.query("SELECT publisher_id, publisher_name FROM Publishers ORDER BY publisher_name");
+    const [rows] = await pool.query(
+      "SELECT publisher_id, publisher_name FROM Publishers ORDER BY publisher_name"
+    );
     res.json({ success: true, data: rows });
   } catch (err) {
     next(err);
   }
 };
 
-// ── GET /api/authors ───────────────────────────────────────────────────────────
+// ── GET /api/books/authors ─────────────────────────────────────────────────────
 export const getAuthors = async (_req, res, next) => {
   try {
-    const [rows] = await pool.query("SELECT author_id, author_name FROM Authors ORDER BY author_name");
+    const [rows] = await pool.query(
+      "SELECT author_id, author_name FROM Authors ORDER BY author_name"
+    );
     res.json({ success: true, data: rows });
   } catch (err) {
     next(err);

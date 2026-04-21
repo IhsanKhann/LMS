@@ -1,3 +1,4 @@
+// config/db.js
 import mysql from "mysql2/promise";
 
 const dbConfig = {
@@ -12,39 +13,32 @@ const dbConfig = {
   dateStrings:        true,
 };
 
-let pool;
-
 /**
- * CONNECT WITH RETRY
- * This ensures the backend doesn't crash if MySQL is still starting up.
+ * Connect with retry — ensures the backend waits for MySQL to be ready
+ * (important in Docker where MySQL needs ~10 s to initialise on first run).
  */
-const connectWithRetry = async (retries = 10, delay = 5000) => {
+const connectWithRetry = async (retries = 12, delay = 5000) => {
   for (let i = 0; i < retries; i++) {
     try {
-      // Create the pool
       const newPool = mysql.createPool(dbConfig);
-      
-      // Test the connection immediately
       const conn = await newPool.getConnection();
       console.log(`✅ MySQL connected → ${dbConfig.database}@${dbConfig.host}`);
-      
       conn.release();
       return newPool;
     } catch (err) {
-      console.error(`❌ DB Connection failed (Attempt ${i + 1}/${retries}): ${err.message}`);
-      
+      console.error(`❌ DB Connection failed (attempt ${i + 1}/${retries}): ${err.message}`);
       if (i < retries - 1) {
-        console.log(`waiting ${delay / 1000}s for MySQL to wake up...`);
-        await new Promise((resolve) => setTimeout(resolve, delay));
+        console.log(`   Waiting ${delay / 1000}s before retry...`);
+        await new Promise((r) => setTimeout(r, delay));
       } else {
-        console.error("Critical: Could not connect to MySQL after multiple attempts.");
-        process.exit(1); // Exit if DB is truly unreachable
+        console.error("Critical: could not connect to MySQL after all retries.");
+        process.exit(1);
       }
     }
   }
 };
 
 // Top-level await (requires "type": "module" in package.json)
-pool = await connectWithRetry();
+const pool = await connectWithRetry();
 
 export default pool;

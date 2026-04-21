@@ -4,21 +4,21 @@ import { useNavigate }              from "react-router-dom";
 import { loginThunk, logoutThunk }  from "../store/slices/authSlice.js";
 
 /**
- * useAuth — convenience hook wrapping Redux auth state + actions
+ * useAuth — convenience hook wrapping Redux auth state + actions.
  *
- * @returns {object} { librarian, isAdmin, loading, error, login, logout }
+ * @returns {{ librarian, isAdmin, isStaff, loading, error, login, logout }}
  */
 export function useAuth() {
-  const dispatch   = useDispatch();
-  const navigate   = useNavigate();
+  const dispatch  = useDispatch();
+  const navigate  = useNavigate();
   const { librarian, loading, error } = useSelector((s) => s.auth);
 
   const login = async (credentials, redirectTo = "/dashboard") => {
-    const res = await dispatch(loginThunk(credentials));
-    if (loginThunk.fulfilled.match(res)) {
+    const result = await dispatch(loginThunk(credentials));
+    if (loginThunk.fulfilled.match(result)) {
       navigate(redirectTo, { replace: true });
     }
-    return res;
+    return result;
   };
 
   const logout = async () => {
@@ -28,8 +28,8 @@ export function useAuth() {
 
   return {
     librarian,
-    isAdmin:  librarian?.role === "admin",
-    isStaff:  librarian?.role === "staff",
+    isAdmin: librarian?.role === "admin",
+    isStaff: librarian?.role === "admin" || librarian?.role === "staff",
     loading,
     error,
     login,
