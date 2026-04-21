@@ -1,11 +1,7 @@
 // controllers/book.controller.js
-// ─────────────────────────────────────────────────────────────────────────────
-// Week 2 — Full CRUD for Books + Book_Copies availability tracking
-// ─────────────────────────────────────────────────────────────────────────────
 import pool from "../config/db.js";
 
 // ── GET /api/books ─────────────────────────────────────────────────────────────
-// Supports: ?search=  ?category_id=  ?page=  ?limit=
 export const getBooks = async (req, res, next) => {
   try {
     const { search, category_id, page = 1, limit = 20 } = req.query;
@@ -13,7 +9,6 @@ export const getBooks = async (req, res, next) => {
     const params = [];
     let where = "WHERE 1=1";
 
-    // IMPORTANT: Use "b." prefix to avoid ambiguity
     if (search) {
       where += " AND (b.title LIKE ? OR b.isbn LIKE ?)";
       params.push(`%${search}%`, `%${search}%`);
@@ -23,7 +18,6 @@ export const getBooks = async (req, res, next) => {
       params.push(category_id);
     }
 
-    // Main Query
     const [rows] = await pool.query(
       `SELECT
           b.book_id,
@@ -34,9 +28,9 @@ export const getBooks = async (req, res, next) => {
           p.publisher_name,
           c.category_id,
           c.category_name,
-          (SELECT GROUP_CONCAT(a.author_name SEPARATOR ', ') 
-           FROM Book_Authors ba 
-           JOIN Authors a ON ba.author_id = a.author_id 
+          (SELECT GROUP_CONCAT(a.author_name SEPARATOR ', ')
+           FROM Book_Authors ba
+           JOIN Authors a ON ba.author_id = a.author_id
            WHERE ba.book_id = b.book_id) AS authors,
           COUNT(DISTINCT bc.copy_id) AS total_copies,
           SUM(CASE WHEN bc.status = 'available' THEN 1 ELSE 0 END) AS available_copies
@@ -51,13 +45,10 @@ export const getBooks = async (req, res, next) => {
       [...params, Number(limit), Number(offset)]
     );
 
-    // Fixed Count Query: Simple and direct
     const [countResult] = await pool.query(
       `SELECT COUNT(*) AS total FROM Books b ${where}`,
       params
     );
-    
-    // Check if countResult exists to prevent "cannot destructure property total"
     const total = countResult[0]?.total || 0;
 
     res.json({
@@ -72,7 +63,7 @@ export const getBooks = async (req, res, next) => {
     });
   } catch (err) {
     console.error("SQL Error in getBooks:", err.message);
-    next(err); // This will now send the actual error to your frontend
+    next(err);
   }
 };
 
@@ -108,9 +99,7 @@ export const getBook = async (req, res, next) => {
   }
 };
 
-// ── POST /api/books  (admin only) ──────────────────────────────────────────────
-// Body: { title, isbn, edition, publication_year, publisher_id, category_id,
-//         author_ids: [1,2], copies: [{ barcode, shelf_location }] }
+// ── POST /api/books ────────────────────────────────────────────────────────────
 export const createBook = async (req, res, next) => {
   const conn = await pool.getConnection();
   try {
@@ -128,7 +117,6 @@ export const createBook = async (req, res, next) => {
       return res.status(400).json({ success: false, message: "title is required" });
     }
 
-    // 1. Insert book
     const [result] = await conn.query(
       `INSERT INTO Books (title, isbn, edition, publication_year, publisher_id, category_id)
        VALUES (?, ?, ?, ?, ?, ?)`,
@@ -137,7 +125,6 @@ export const createBook = async (req, res, next) => {
     );
     const book_id = result.insertId;
 
-    // 2. Link authors
     if (author_ids.length) {
       const vals = author_ids.map((aid, i) => [book_id, aid, i + 1]);
       await conn.query(
@@ -146,7 +133,6 @@ export const createBook = async (req, res, next) => {
       );
     }
 
-    // 3. Insert physical copies
     if (copies.length) {
       const copyVals = copies.map(({ barcode, shelf_location }) => [
         book_id, barcode, shelf_location || null,
@@ -167,8 +153,7 @@ export const createBook = async (req, res, next) => {
   }
 };
 
-// ── PUT /api/books/:id  (admin only) ──────────────────────────────────────────
-// Replaces book metadata and re-syncs author list.
+// ── PUT /api/books/:id ─────────────────────────────────────────────────────────
 export const updateBook = async (req, res, next) => {
   const conn = await pool.getConnection();
   try {
@@ -181,7 +166,6 @@ export const updateBook = async (req, res, next) => {
     } = req.body;
     const { id } = req.params;
 
-    // Build dynamic SET clause
     const fields = [];
     const vals   = [];
     if (title            !== undefined) { fields.push("title = ?");            vals.push(title); }
@@ -198,7 +182,6 @@ export const updateBook = async (req, res, next) => {
       );
     }
 
-    // Re-sync authors if provided
     if (Array.isArray(author_ids)) {
       await conn.query("DELETE FROM Book_Authors WHERE book_id = ?", [id]);
       if (author_ids.length) {
@@ -220,11 +203,9 @@ export const updateBook = async (req, res, next) => {
   }
 };
 
-// ── DELETE /api/books/:id  (admin only) ────────────────────────────────────────
-// Blocked by FK if any copies are currently issued (ON DELETE RESTRICT on Issue_Transactions).
+// ── DELETE /api/books/:id ──────────────────────────────────────────────────────
 export const deleteBook = async (req, res, next) => {
   try {
-    // Check for active issues before attempting delete
     const [[{ active }]] = await pool.query(
       `SELECT COUNT(*) AS active
        FROM Issue_Transactions it
@@ -255,11 +236,10 @@ export const deleteBook = async (req, res, next) => {
   }
 };
 
-// ── POST /api/books/:id/copies  (admin only) ───────────────────────────────────
-// Add physical copies to an existing book.
+// ── POST /api/books/:id/copies ─────────────────────────────────────────────────
 export const addCopies = async (req, res, next) => {
   try {
-    const { copies } = req.body; // [{ barcode, shelf_location }]
+    const { copies } = req.body;
     if (!Array.isArray(copies) || !copies.length) {
       return res.status(400).json({ success: false, message: "copies[] is required" });
     }
@@ -280,9 +260,33 @@ export const addCopies = async (req, res, next) => {
 };
 
 // ── GET /api/books/categories ──────────────────────────────────────────────────
+// ⚠️  FIX: This is also registered at GET /api/categories (see book.routes.js note).
+//     The route /categories in book.routes.js must be declared BEFORE /:id.
 export const getCategories = async (_req, res, next) => {
   try {
     const [rows] = await pool.query("SELECT * FROM Categories ORDER BY category_name");
+    res.json({ success: true, data: rows });
+  } catch (err) {
+    next(err);
+  }
+};
+
+// ── GET /api/publishers ────────────────────────────────────────────────────────
+// ⚠️  FIX: BookForm.jsx calls GET /api/publishers and GET /api/authors but
+//     no routes existed for them. Added here and wired in book.routes.js.
+export const getPublishers = async (_req, res, next) => {
+  try {
+    const [rows] = await pool.query("SELECT publisher_id, publisher_name FROM Publishers ORDER BY publisher_name");
+    res.json({ success: true, data: rows });
+  } catch (err) {
+    next(err);
+  }
+};
+
+// ── GET /api/authors ───────────────────────────────────────────────────────────
+export const getAuthors = async (_req, res, next) => {
+  try {
+    const [rows] = await pool.query("SELECT author_id, author_name FROM Authors ORDER BY author_name");
     res.json({ success: true, data: rows });
   } catch (err) {
     next(err);

@@ -3,17 +3,24 @@ import pool from "../config/db.js";
 
 // ── issueBook ─────────────────────────────────────────────────────────────────
 // POST /api/transactions/issue
-// Body: { copy_id, member_id }
-// Authenticated librarian handles the transaction.
 export const issueBook = async (req, res, next) => {
   const conn = await pool.getConnection();
   try {
     await conn.beginTransaction();
 
     const { copy_id, member_id } = req.body;
-    const librarian_id = req.librarian.librarian_id;
 
-    // 1. Verify the copy exists and is available
+    // ⚠️  FIX: The original code read req.librarian.librarian_id, but
+    //     checkAuth attaches the decoded JWT payload to req.user (id, role).
+    //     Using req.librarian would throw "Cannot read properties of undefined".
+    const librarian_id = req.user?.id;
+
+    if (!copy_id || !member_id) {
+      await conn.rollback();
+      return res.status(400).json({ success: false, message: "copy_id and member_id are required" });
+    }
+
+    // 1. Verify copy exists and is available
     const [[copy]] = await conn.query(
       "SELECT copy_id, book_id, status FROM Book_Copies WHERE copy_id = ?",
       [copy_id]
@@ -27,7 +34,7 @@ export const issueBook = async (req, res, next) => {
       return res.status(409).json({ success: false, message: "Book copy is not available" });
     }
 
-    // 2. Fetch the member and their borrowing policy
+    // 2. Fetch member + borrowing policy
     const [[member]] = await conn.query(
       `SELECT lm.member_id, lm.member_type, lm.status,
               bp.max_books_allowed, bp.loan_duration_days, bp.fine_per_day
@@ -45,7 +52,7 @@ export const issueBook = async (req, res, next) => {
       return res.status(403).json({ success: false, message: "Member account is suspended" });
     }
 
-    // 3. Check borrowing limit: count currently unreturned books
+    // 3. Borrowing limit check
     const [[{ current_count }]] = await conn.query(
       `SELECT COUNT(*) AS current_count
        FROM Issue_Transactions
@@ -60,13 +67,13 @@ export const issueBook = async (req, res, next) => {
       });
     }
 
-    // 4. Calculate due date (NULL loan_duration_days = no limit → set far future)
+    // 4. Calculate due date
     const issueDate = new Date();
     const dueDate   = member.loan_duration_days
       ? new Date(issueDate.getTime() + member.loan_duration_days * 86400000)
       : new Date("9999-12-31");
 
-    // 5. Create the transaction record
+    // 5. Insert transaction
     const [result] = await conn.query(
       `INSERT INTO Issue_Transactions
          (copy_id, member_id, librarian_id, issue_date, due_date, fine_amount)
@@ -74,7 +81,7 @@ export const issueBook = async (req, res, next) => {
       [copy_id, member_id, librarian_id, dueDate.toISOString().split("T")[0]]
     );
 
-    // 6. Update copy status to 'issued'
+    // 6. Mark copy as issued
     await conn.query(
       "UPDATE Book_Copies SET status = 'issued' WHERE copy_id = ?",
       [copy_id]
@@ -86,12 +93,12 @@ export const issueBook = async (req, res, next) => {
       success: true,
       message: "Book issued successfully",
       data: {
-        issue_id:    result.insertId,
+        issue_id:        result.insertId,
         copy_id,
         member_id,
-        issue_date:  issueDate.toISOString().split("T")[0],
-        due_date:    dueDate.toISOString().split("T")[0],
-        member_type: member.member_type,
+        issue_date:      issueDate.toISOString().split("T")[0],
+        due_date:        dueDate.toISOString().split("T")[0],
+        member_type:     member.member_type,
         books_remaining: member.max_books_allowed - current_count - 1,
       },
     });
@@ -112,7 +119,6 @@ export const returnBook = async (req, res, next) => {
 
     const { issueId } = req.params;
 
-    // Fetch transaction + policy for fine calculation
     const [[txn]] = await conn.query(
       `SELECT it.issue_id, it.copy_id, it.member_id, it.due_date,
               it.return_date, bp.fine_per_day
@@ -132,13 +138,11 @@ export const returnBook = async (req, res, next) => {
       return res.status(409).json({ success: false, message: "Book already returned" });
     }
 
-    // Calculate fine
-    const today     = new Date();
-    const due       = new Date(txn.due_date);
-    const daysLate  = Math.max(0, Math.floor((today - due) / 86400000));
-    const fineAmt   = (daysLate * parseFloat(txn.fine_per_day)).toFixed(2);
+    const today    = new Date();
+    const due      = new Date(txn.due_date);
+    const daysLate = Math.max(0, Math.floor((today - due) / 86400000));
+    const fineAmt  = (daysLate * parseFloat(txn.fine_per_day)).toFixed(2);
 
-    // Update transaction with return date and fine
     await conn.query(
       `UPDATE Issue_Transactions
        SET return_date = CURRENT_DATE, fine_amount = ?
@@ -146,7 +150,6 @@ export const returnBook = async (req, res, next) => {
       [fineAmt, issueId]
     );
 
-    // Restore copy status
     await conn.query(
       "UPDATE Book_Copies SET status = 'available' WHERE copy_id = ?",
       [txn.copy_id]

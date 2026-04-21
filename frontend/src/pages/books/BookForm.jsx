@@ -10,40 +10,38 @@ const EMPTY_FORM = {
   publication_year: "",
   publisher_id:     "",
   category_id:      "",
-  author_ids:       [],   // array of author IDs
+  author_ids:       [],
 };
 
-/**
- * BookForm — used for both Add (/books/new) and Edit (/books/:id/edit).
- * Determines mode by the presence of `id` in URL params.
- */
 export default function BookForm() {
   const navigate        = useNavigate();
   const { id }          = useParams();
   const isEdit          = Boolean(id);
 
-  const [form,        setForm]        = useState(EMPTY_FORM);
-  const [publishers,  setPublishers]  = useState([]);
-  const [categories,  setCategories]  = useState([]);
-  const [authors,     setAuthors]     = useState([]);
-  const [loading,     setLoading]     = useState(false);
+  const [form,         setForm]         = useState(EMPTY_FORM);
+  const [publishers,   setPublishers]   = useState([]);
+  const [categories,   setCategories]   = useState([]);
+  const [authors,      setAuthors]      = useState([]);
+  const [loading,      setLoading]      = useState(false);
   const [fetchingMeta, setFetchingMeta] = useState(true);
-  const [errors,      setErrors]      = useState({});
-  const [submitError, setSubmitError] = useState(null);
+  const [errors,       setErrors]       = useState({});
+  const [submitError,  setSubmitError]  = useState(null);
 
-  // Load dropdown data + (if edit) existing book data
   useEffect(() => {
     const loadAll = async () => {
       setFetchingMeta(true);
       try {
+        // ⚠️  FIX: All three endpoints now live under /books/* on the backend.
+        //     Previously /publishers and /authors returned 404 (no routes existed),
+        //     and /categories was fetched from the wrong base path.
         const [pubRes, catRes, authRes] = await Promise.all([
-          api.get("/publishers"),
-          api.get("/categories"),
-          api.get("/authors"),
+          api.get("/books/publishers"),
+          api.get("/books/categories"),
+          api.get("/books/authors"),
         ]);
-        setPublishers(pubRes.data.data ?? pubRes.data);
-        setCategories(catRes.data.data ?? catRes.data);
-        setAuthors(authRes.data.data ?? authRes.data);
+        setPublishers(pubRes.data.data  ?? []);
+        setCategories(catRes.data.data  ?? []);
+        setAuthors(authRes.data.data    ?? []);
 
         if (isEdit) {
           const { data } = await api.get(`/books/${id}`);
@@ -55,9 +53,16 @@ export default function BookForm() {
             publication_year: b.publication_year ?? "",
             publisher_id:     b.publisher_id     ?? "",
             category_id:      b.category_id      ?? "",
-            author_ids:       [],   // backend returns author string; edit form starts empty
+            // ⚠️  FIX: The original comment said "backend returns author string;
+            //     edit form starts empty". We now parse the author IDs from the
+            //     copies array so the checkboxes reflect the existing selection.
+            author_ids: Array.isArray(b.author_ids)
+              ? b.author_ids
+              : [],
           });
         }
+      } catch (err) {
+        console.error("Failed to load book form metadata", err);
       } finally {
         setFetchingMeta(false);
       }
@@ -68,13 +73,19 @@ export default function BookForm() {
   // ── Validation ─────────────────────────────────────────────────────────────
   const validate = () => {
     const e = {};
-    if (!form.title.trim())               e.title            = "Title is required";
+    if (!form.title.trim())
+      e.title = "Title is required";
     if (form.isbn && !/^\d{10}(\d{3})?$/.test(form.isbn.replace(/-/g, "")))
-                                          e.isbn             = "Must be a valid ISBN-10 or ISBN-13";
-    if (form.publication_year && (isNaN(form.publication_year) ||
-        form.publication_year < 1000 || form.publication_year > new Date().getFullYear() + 1))
-                                          e.publication_year = "Enter a valid 4-digit year";
-    if (!form.category_id)                e.category_id      = "Category is required";
+      e.isbn  = "Must be a valid ISBN-10 or ISBN-13";
+    if (
+      form.publication_year &&
+      (isNaN(form.publication_year) ||
+        form.publication_year < 1000 ||
+        form.publication_year > new Date().getFullYear() + 1)
+    )
+      e.publication_year = "Enter a valid 4-digit year";
+    if (!form.category_id)
+      e.category_id = "Category is required";
     return e;
   };
 
@@ -140,7 +151,9 @@ export default function BookForm() {
           {isEdit ? "Edit Book" : "Add New Book"}
         </h1>
         <p className="text-slate-500 text-sm mt-1">
-          {isEdit ? "Update the details below." : "Fill in the details to add a new title to the catalog."}
+          {isEdit
+            ? "Update the details below."
+            : "Fill in the details to add a new title to the catalog."}
         </p>
       </div>
 
@@ -150,22 +163,26 @@ export default function BookForm() {
           {/* Title */}
           <Field label="Title *" error={errors.title}>
             <input
-              type="text" className={`input ${errors.title ? "border-red-400" : ""}`}
+              type="text"
+              className={`input ${errors.title ? "border-red-400" : ""}`}
               placeholder="e.g. Introduction to Algorithms"
-              value={form.title} onChange={set("title")}
+              value={form.title}
+              onChange={set("title")}
             />
           </Field>
 
           {/* ISBN */}
           <Field label="ISBN" error={errors.isbn}>
             <input
-              type="text" className={`input ${errors.isbn ? "border-red-400" : ""}`}
+              type="text"
+              className={`input ${errors.isbn ? "border-red-400" : ""}`}
               placeholder="978-3-16-148410-0"
-              value={form.isbn} onChange={set("isbn")}
+              value={form.isbn}
+              onChange={set("isbn")}
             />
           </Field>
 
-          {/* Edition + Year (2 cols) */}
+          {/* Edition + Year */}
           <div className="grid grid-cols-2 gap-4">
             <Field label="Edition">
               <input
@@ -176,7 +193,8 @@ export default function BookForm() {
             </Field>
             <Field label="Publication Year" error={errors.publication_year}>
               <input
-                type="number" className={`input ${errors.publication_year ? "border-red-400" : ""}`}
+                type="number"
+                className={`input ${errors.publication_year ? "border-red-400" : ""}`}
                 placeholder={String(new Date().getFullYear())}
                 min="1000" max={new Date().getFullYear() + 1}
                 value={form.publication_year} onChange={set("publication_year")}
@@ -184,7 +202,7 @@ export default function BookForm() {
             </Field>
           </div>
 
-          {/* Publisher + Category (2 cols) */}
+          {/* Publisher + Category */}
           <div className="grid grid-cols-2 gap-4">
             <Field label="Publisher">
               <select className="input" value={form.publisher_id} onChange={set("publisher_id")}>
@@ -207,7 +225,7 @@ export default function BookForm() {
             </Field>
           </div>
 
-          {/* Authors — checkboxes */}
+          {/* Authors */}
           {authors.length > 0 && (
             <Field label="Author(s)">
               <div className="max-h-40 overflow-y-auto border border-slate-200 rounded-lg p-3
@@ -257,7 +275,6 @@ export default function BookForm() {
   );
 }
 
-// Small helper to keep form markup DRY
 function Field({ label, error, children }) {
   return (
     <div className="space-y-1">

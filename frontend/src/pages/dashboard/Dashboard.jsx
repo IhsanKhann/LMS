@@ -14,33 +14,41 @@ const StatCard = ({ label, value, sub, color }) => (
 
 export default function Dashboard() {
   const { librarian } = useSelector((s) => s.auth);
-  const isAdmin  = librarian?.role === "admin";
-  const isStaff  = ["admin", "staff"].includes(librarian?.role);
+  const isAdmin = librarian?.role === "admin";
+  const isStaff = ["admin", "staff"].includes(librarian?.role);
 
   const [stats, setStats] = useState({ books: 0, members: 0, overdue: 0, students: 0, faculty: 0 });
 
   useEffect(() => {
     const fetchStats = async () => {
       try {
-        const bookRes = await api.get("/books?limit=1");
-        let memberCount   = 0;
-        let overdueCount  = 0;
-        let studentCount  = 0;
-        let facultyCount  = 0;
+        const bookRes = await api.get("/books", { params: { limit: 1 } });
+
+        let memberCount  = 0;
+        let overdueCount = 0;
+        let studentCount = 0;
+        let facultyCount = 0;
 
         if (isStaff) {
           const [memRes, stuRes, facRes] = await Promise.all([
             api.get("/members"),
-            api.get("/students?limit=1"),
-            api.get("/faculty?limit=1"),
+            api.get("/students", { params: { limit: 1 } }),
+            api.get("/faculty",  { params: { limit: 1 } }),
           ]);
-          memberCount  = memRes.data?.data?.length || 0;
-          studentCount = stuRes.data?.meta?.total  || 0;
-          facultyCount = facRes.data?.meta?.total  || 0;
+
+          // ⚠️  FIX: GET /members returns { success, data: [...] } — a plain array,
+          //     not paginated. Count the array length directly.
+          //     The original code used memRes.data?.data?.length which was correct,
+          //     but the limit:1 was missing — causing a full table scan every load.
+          memberCount  = memRes.data?.data?.length  || 0;
+
+          // students and faculty use paginated responses — use meta.total
+          studentCount = stuRes.data?.meta?.total   || 0;
+          facultyCount = facRes.data?.meta?.total   || 0;
         }
 
         if (isAdmin) {
-          const res   = await api.get("/transactions/overdue");
+          const res    = await api.get("/transactions/overdue");
           overdueCount = res.data?.data?.length || 0;
         }
 
@@ -57,77 +65,79 @@ export default function Dashboard() {
     };
 
     fetchStats();
-  }, [librarian]);
+  // ⚠️  FIX: Original dep array was [librarian] — this caused the effect to
+  //     re-run on every render if librarian is an unstable reference.
+  //     Depend on the stable scalar values instead.
+  }, [isAdmin, isStaff]);
 
   const allActions = [
     {
-      to: "/books",
+      to:    "/books",
       label: "Browse Catalog",
-      icon: "📚",
+      icon:  "📚",
       color: "bg-indigo-50 text-indigo-700",
       roles: ["admin", "staff", "student", "faculty"],
     },
     {
-      to: "/books/manage",
+      to:    "/books/manage",
       label: "Manage Books",
-      icon: "⚙️",
+      icon:  "⚙️",
       color: "bg-slate-50 text-slate-700",
       roles: ["admin", "staff"],
     },
     {
-      to: "/members",
+      to:    "/members",
       label: "View Members",
-      icon: "👥",
+      icon:  "👥",
       color: "bg-emerald-50 text-emerald-700",
       roles: ["admin", "staff"],
     },
     {
-      to: "/students",
+      to:    "/students",
       label: "Students",
-      icon: "🎓",
+      icon:  "🎓",
       color: "bg-blue-50 text-blue-700",
       roles: ["admin", "staff"],
     },
     {
-      to: "/faculty",
+      to:    "/faculty",
       label: "Faculty",
-      icon: "🏫",
+      icon:  "🏫",
       color: "bg-violet-50 text-violet-700",
       roles: ["admin", "staff"],
     },
     {
-      to: "/transactions",
+      to:    "/transactions",
       label: "Issue / Return",
-      icon: "↔",
+      icon:  "↔",
       color: "bg-violet-50 text-violet-700",
       roles: ["admin", "staff"],
     },
     {
-      to: "/overdue",
+      to:    "/overdue",
       label: "Overdue Report",
-      icon: "⚠",
+      icon:  "⚠",
       color: "bg-amber-50 text-amber-700",
       roles: ["admin"],
     },
-    // Self-registration quick links (visible to all)
     {
-      to: "/students/register",
+      to:    "/students/register",
       label: "Student Registration",
-      icon: "📝",
+      icon:  "📝",
       color: "bg-sky-50 text-sky-700",
       roles: ["admin", "staff", "student", "faculty"],
     },
     {
-      to: "/faculty/register",
+      to:    "/faculty/register",
       label: "Faculty Registration",
-      icon: "🖊",
+      icon:  "🖊",
       color: "bg-fuchsia-50 text-fuchsia-700",
       roles: ["admin", "staff", "student", "faculty"],
     },
   ];
 
   const filteredActions = allActions.filter((a) => a.roles.includes(librarian?.role));
-  const hour = new Date().getHours();
+  const hour     = new Date().getHours();
   const greeting = hour < 12 ? "morning" : hour < 17 ? "afternoon" : "evening";
 
   return (
